@@ -637,6 +637,7 @@ class AcadosCasadiOcpSolver:
         if use_acados_hessian:
             casadi_solver_opts["cache"] = {"nlp_hess_l": self.nlp_hess_l_custom}
         self.casadi_solver = ca.nlpsol("nlp_solver", solver, self.casadi_nlp, casadi_solver_opts)
+        self.casadi_solver_opts = casadi_solver_opts
 
         # create solution and initial guess
         self.lam_x0 = np.empty(self.casadi_nlp['x'].shape).flatten()
@@ -968,3 +969,41 @@ class AcadosCasadiOcpSolver:
 
     def cost_set(self, stage_: int, field_: str, value_):
         raise NotImplementedError()
+
+    def investigate_fatrop_structure(self, plot: bool = False):
+        """
+        Investigate the structure of the fatrop solver.
+        """
+        if self.casadi_solver_opts['debug'] != True:
+            raise ValueError("Debug mode must be enabled to investigate the fatrop structure.")
+        elif self.nlp_sol is None:
+            raise ValueError("No solution available. Please call solve() first.")
+
+        import os
+        mtx_path = os.getcwd()
+        errors = ca.Sparsity.from_file(os.path.join(mtx_path, "debug_fatrop_errors.mtx")).row()
+        if len(errors) == 0:
+            print("No errors found in fatrop structure detection.")
+        else:
+            raise ValueError(f"Error row found in fatrop structure detection: {errors}")
+        if plot:
+            print("Plotting fatrop structure results...")
+            import matplotlib.pyplot as plt
+            matrices_info = [("A", "r", 5, "expected A", 'white'),
+                            ("B", "b", 5, "expected B", 'white'),
+                            ("C", "g", 5, "expected C", 'white'),
+                            ("D", "y", 5, "expected D", 'white'),
+                            ("I", "k", 5, "expected I", 'white'),
+                            ("actual", "k", 2, "actual", 'black')]
+            matrices_data = []
+            plt.figure()
+            for name, color, markersize, label, markerfacecolor in matrices_info:
+                mtx = ca.Sparsity.from_file(os.path.join(mtx_path, f"debug_fatrop_{name}.mtx"))
+                matrices_data.append(mtx)
+                plt.spy(mtx, marker='o', color=color, markersize=markersize, label=label, markerfacecolor=markerfacecolor)
+            plt.hlines(errors, 0, matrices_data[0].shape[1],color='gray', linestyle='-',label="offending rows")
+            plt.title("Debug view of fatrop interface structure detection")
+            plt.legend()
+            plt.show()
+            del plt
+        del os
