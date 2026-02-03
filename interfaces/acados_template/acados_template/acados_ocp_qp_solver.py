@@ -368,22 +368,14 @@ class AcadosOcpQpSolver:
 
         return out
 
-
     def get_flat(self, field_: str) -> np.ndarray:
         raise NotImplementedError("get_flat() not implemented yet.")
-
 
     def set_flat(self, field_: str, value_: np.ndarray) -> None:
         raise NotImplementedError("set_flat() not implemented yet.")
 
     def print_statistics(self):
         raise NotImplementedError("print_statistics() not implemented yet.")
-        return
-
-
-    def qp_diagnostics(self, hessian_type: str = 'FULL_HESSIAN'):
-        raise NotImplementedError("qp_diagnostics() not implemented yet.")
-        # TODO: implement something joint for NLP and QP solver
 
     def get_stats(self, field_: str) -> Union[int, float, np.ndarray]:
         int_fields = ['iter']
