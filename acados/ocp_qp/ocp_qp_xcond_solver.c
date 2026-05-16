@@ -550,6 +550,10 @@ int ocp_qp_xcond_solve(void *config_, ocp_qp_xcond_solver_dims *dims, ocp_qp_in 
     xcond->condensing(qp_in, memory->xcond_qp_in, opts->xcond_opts, memory->xcond_memory, work->xcond_work);
     info->condensing_time = acados_toc(&cond_timer);
 
+    printf("print b of qp_in\n");
+    int length = qp_in->dim->nx[1];
+    blasfeo_print_tran_dvec(length, qp_in->b, 0);
+
     if (opts->initialize_next_xcond_qp_from_qp_out)
     {
         // printf("initialize_next_xcond_qp_from_qp_out\n");
