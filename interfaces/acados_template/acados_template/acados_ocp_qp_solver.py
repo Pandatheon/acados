@@ -293,10 +293,10 @@ class AcadosOcpQpSolver:
                                 ]
         int_fields = ['idxb', 'idxe', 'idxs_rev']
 
-        # print b_k
-        print("-- b_k in python interface:")
-        for k in range(N):
-            print(f"Stage {k}: b[{k}] = \n{qp.b[k]}")
+        # # print b_k
+        # print("-- b_k in python interface:")
+        # for k in range(N):
+        #     print(f"Stage {k}: b[{k}] = \n{qp.b[k]}")
 
         for i in range(N + 1):
             for field_name, value_list in fieldname_list_pairs:
