@@ -436,7 +436,7 @@ class AcadosOcpOptions:
 
     @hpipm_mode.setter
     def hpipm_mode(self, hpipm_mode):
-        hpipm_modes = ('BALANCE', 'SPEED_ABS', 'SPEED', 'ROBUST')
+        hpipm_modes = ('BALANCE', 'SPEED_ABS', 'SPEED', 'ROBUST', 'CUSTOMIZED')
         if hpipm_mode not in hpipm_modes:
             raise ValueError('Invalid hpipm_mode value. Possible values are:\n\n' \
                     + ',\n'.join(hpipm_modes) + '.\n\nYou have: ' + hpipm_mode + '.\n\n')
