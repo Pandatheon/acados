@@ -3,30 +3,7 @@
 #
 # This file is part of acados.
 #
-# The 2-Clause BSD License
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#
-# 1. Redistributions of source code must retain the above copyright notice,
-# this list of conditions and the following disclaimer.
-#
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-# this list of conditions and the following disclaimer in the documentation
-# and/or other materials provided with the distribution.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-# POSSIBILITY OF SUCH DAMAGE.;
-#
+# Licensed under the 2-Clause BSD License.
 
 
 from acados_template import AcadosModel, AcadosOcpDims, AcadosSimDims
@@ -806,8 +783,6 @@ def detect_gnsf_structure(model: AcadosModel, dims: Union[AcadosSimDims, AcadosO
     check_reformulation(model, gnsf, print_info)
 
     ## copy relevant fields from gnsf to model
-    model_name = model.name
-
     phi = gnsf["phi_expr"]
     y = gnsf["y"]
     uhat = gnsf["uhat"]
@@ -816,13 +791,13 @@ def detect_gnsf_structure(model: AcadosModel, dims: Union[AcadosSimDims, AcadosO
     jac_phi_y = ca.jacobian(phi, y)
     jac_phi_uhat = ca.jacobian(phi, uhat)
 
-    phi_fun = ca.Function(f"{model_name}_gnsf_phi_fun", [y, uhat, p], [phi])
+    phi_fun = ca.Function(f"{model.name}_gnsf_phi_fun", [y, uhat, p], [phi])
     model.phi_fun = phi_fun
     model.phi_fun_jac_y = ca.Function(
-        f"{model_name}_gnsf_phi_fun_jac_y", [y, uhat, p], [phi, jac_phi_y]
+        f"{model.name}_gnsf_phi_fun_jac_y", [y, uhat, p], [phi, jac_phi_y]
     )
     model.phi_jac_y_uhat = ca.Function(
-        f"{model_name}_gnsf_phi_jac_y_uhat", [y, uhat, p], [jac_phi_y, jac_phi_uhat]
+        f"{model.name}_gnsf_phi_jac_y_uhat", [y, uhat, p], [jac_phi_y, jac_phi_uhat]
     )
 
     # flags

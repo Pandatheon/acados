@@ -3,29 +3,7 @@
 %
 % This file is part of acados.
 %
-% The 2-Clause BSD License
-%
-% Redistribution and use in source and binary forms, with or without
-% modification, are permitted provided that the following conditions are met:
-%
-% 1. Redistributions of source code must retain the above copyright notice,
-% this list of conditions and the following disclaimer.
-%
-% 2. Redistributions in binary form must reproduce the above copyright notice,
-% this list of conditions and the following disclaimer in the documentation
-% and/or other materials provided with the distribution.
-%
-% THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-% AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-% IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-% ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-% LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-% CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-% SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-% INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-% CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-% ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-% POSSIBILITY OF SUCH DAMAGE.;
+% Licensed under the 2-Clause BSD License.
 
 %
 %   Author: Jonathan Frey: jonathanpaulfrey(at)gmail.com
@@ -137,33 +115,33 @@ function detect_gnsf_structure(model, dims, transcribe_opts)
     model.sym_gnsf_uhat = gnsf.uhat;
 
     % data
-    model.dyn_gnsf_A = gnsf.A;
-    model.dyn_gnsf_A_LO = gnsf.A_LO;
-    model.dyn_gnsf_B = gnsf.B;
-    model.dyn_gnsf_B_LO = gnsf.B_LO;
-    model.dyn_gnsf_E = gnsf.E;
-    model.dyn_gnsf_E_LO = gnsf.E_LO;
-    model.dyn_gnsf_C = gnsf.C;
-    model.dyn_gnsf_c = gnsf.c;
-    model.dyn_gnsf_c_LO = gnsf.c_LO;
-    model.dyn_gnsf_L_x = gnsf.L_x;
-    model.dyn_gnsf_L_xdot = gnsf.L_xdot;
-    model.dyn_gnsf_L_z = gnsf.L_z;
-    model.dyn_gnsf_L_u = gnsf.L_u;
-    model.dyn_gnsf_idx_perm_x = gnsf.idx_perm_x;
-    model.dyn_gnsf_ipiv_x = gnsf.ipiv_x;
-    model.dyn_gnsf_idx_perm_z = gnsf.idx_perm_z;
-    model.dyn_gnsf_ipiv_z = gnsf.ipiv_z;
-    model.dyn_gnsf_idx_perm_f = gnsf.idx_perm_f;
-    model.dyn_gnsf_ipiv_f = gnsf.ipiv_f;
+    model.gnsf_model.A = gnsf.A;
+    model.gnsf_model.A_LO = gnsf.A_LO;
+    model.gnsf_model.B = gnsf.B;
+    model.gnsf_model.B_LO = gnsf.B_LO;
+    model.gnsf_model.E = gnsf.E;
+    model.gnsf_model.E_LO = gnsf.E_LO;
+    model.gnsf_model.C = gnsf.C;
+    model.gnsf_model.c = gnsf.c;
+    model.gnsf_model.c_LO = gnsf.c_LO;
+    model.gnsf_model.L_x = gnsf.L_x;
+    model.gnsf_model.L_xdot = gnsf.L_xdot;
+    model.gnsf_model.L_z = gnsf.L_z;
+    model.gnsf_model.L_u = gnsf.L_u;
+    model.gnsf_model.idx_perm_x = gnsf.idx_perm_x;
+    model.gnsf_model.ipiv_x = gnsf.ipiv_x;
+    model.gnsf_model.idx_perm_z = gnsf.idx_perm_z;
+    model.gnsf_model.ipiv_z = gnsf.ipiv_z;
+    model.gnsf_model.idx_perm_f = gnsf.idx_perm_f;
+    model.gnsf_model.ipiv_f = gnsf.ipiv_f;
 
     % flags
     model.gnsf_model.nontrivial_f_LO = gnsf.nontrivial_f_LO;
     model.gnsf_model.purely_linear = gnsf.purely_linear;
 
     % casadi expr
-    model.dyn_gnsf_expr_phi = gnsf.phi_expr;
-    model.dyn_gnsf_expr_f_lo = gnsf.f_lo_expr;
+    model.gnsf_model.phi = gnsf.phi_expr;
+    model.gnsf_model.f_lo = gnsf.f_lo_expr;
 
 
 end

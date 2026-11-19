@@ -3,29 +3,7 @@
 %
 % This file is part of acados.
 %
-% The 2-Clause BSD License
-%
-% Redistribution and use in source and binary forms, with or without
-% modification, are permitted provided that the following conditions are met:
-%
-% 1. Redistributions of source code must retain the above copyright notice,
-% this list of conditions and the following disclaimer.
-%
-% 2. Redistributions in binary form must reproduce the above copyright notice,
-% this list of conditions and the following disclaimer in the documentation
-% and/or other materials provided with the distribution.
-%
-% THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-% AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-% IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-% ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-% LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-% CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-% SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-% INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-% CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-% ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-% POSSIBILITY OF SUCH DAMAGE.;
+% Licensed under the 2-Clause BSD License.
 
 %
 
@@ -82,6 +60,10 @@ classdef {{ name }}_mex_solver < handle
         end
 
         function set(varargin)
+            % usage:
+            % ocp.set(field, value) - value is a flattened concatenation of a trajectory of values
+            % ocp.set(field, value, stage) - set the value for the given field at a single stage
+            % ocp.set(field, value, stage_0, stage_e) - set the value for the given field at a range of stages, 0-based indexing, stage_e is not included
             obj = varargin{1};
             field = varargin{2};
             value = varargin{3};
@@ -93,8 +75,12 @@ classdef {{ name }}_mex_solver < handle
             elseif nargin==4
                 stage = varargin{4};
                 acados_mex_set_{{ name }}(obj.C_ocp, field, value, stage);
+            elseif nargin==5
+                stage_0 = varargin{4};
+                stage_e = varargin{5};
+                acados_mex_set_{{ name }}(obj.C_ocp, field, value, stage_0, stage_e);
             else
-                disp('acados_ocp.set: wrong number of input arguments (2 or 3 allowed)');
+                error('acados_ocp.set: wrong number of input arguments, 2 to 4 are allowed.\n');
             end
         end
 
@@ -119,7 +105,7 @@ classdef {{ name }}_mex_solver < handle
                 stage = varargin{4};
                 acados_mex_set_{{ name }}(obj.C_ocp, field, value, stage);
             else
-                disp('acados_ocp.set_params_sparse: wrong number of input arguments (3 or 4 allowed)');
+                error('acados_ocp.set_params_sparse: wrong number of input arguments (3 to 4 allowed)');
             end
         end
 
@@ -168,7 +154,7 @@ classdef {{ name }}_mex_solver < handle
                 iteration = varargin{4};
                 value = ocp_get(obj.C_ocp, field, stage, iteration);
             else
-                disp('acados_ocp.get: wrong number of input arguments (1, 2 or 3 allowed)');
+                error('acados_ocp.get: wrong number of input arguments (1, 2 or 3 allowed)');
             end
 
 
@@ -188,8 +174,26 @@ classdef {{ name }}_mex_solver < handle
             end
         end
 
-        function [] = reset(obj)
-            acados_mex_set_{{ name }}(obj.C_ocp, 'reset', 1);
+        function [] = reset(varargin)
+            % usage:
+            % obj.reset()
+            % obj.reset(reset_qp_solver_mem, reset_numerical_values, reset_solver_options, reset_x_to_x0_bar)
+            % additional flags are optional, default values are 1,0,0,0
+            obj = varargin{1};
+
+            if nargin > 5
+                error('reset expects at most 4 flags: reset_qp_solver_mem, reset_numerical_values, reset_solver_options, reset_x_to_x0_bar');
+            end
+
+            flags = [1, 0, 0, 0];
+            for i=2:nargin
+                if ~isscalar(varargin{i}) || ~(varargin{i} == 0 || varargin{i} == 1)
+                    error('reset flags must be numeric (0 or 1)');
+                end
+                flags(i-1) = varargin{i};
+            end
+
+            acados_mex_set_{{ name }}(obj.C_ocp, 'reset', flags);
         end
 
 

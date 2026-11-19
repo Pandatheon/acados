@@ -3,29 +3,7 @@
  *
  * This file is part of acados.
  *
- * The 2-Clause BSD License
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright notice,
- * this list of conditions and the following disclaimer.
- *
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- * this list of conditions and the following disclaimer in the documentation
- * and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.;
+ * Licensed under the 2-Clause BSD License.
  */
 
 
@@ -44,6 +22,7 @@
 #include "acados/ocp_nlp/ocp_nlp_cost_nls.h"
 #include "acados/ocp_nlp/ocp_nlp_cost_conl.h"
 #include "acados/ocp_nlp/ocp_nlp_dynamics_cont.h"
+#include "acados/ocp_nlp/ocp_nlp_dynamics_cont_with_cost.h"
 #include "acados/ocp_nlp/ocp_nlp_dynamics_disc.h"
 #include "acados/ocp_nlp/ocp_nlp_constraints_bgh.h"
 #include "acados/ocp_nlp/ocp_nlp_constraints_bgp.h"
@@ -314,6 +293,30 @@ ocp_nlp_config *ocp_nlp_config_create(ocp_nlp_plan_t plan)
                 sim_solver_t solver_name = plan.sim_solver_plan[i].sim_solver;
 
                 switch (solver_name)
+                {
+                    case ERK:
+                        sim_erk_config_initialize_default(config->dynamics[i]->sim_solver);
+                        break;
+                    case IRK:
+                        sim_irk_config_initialize_default(config->dynamics[i]->sim_solver);
+                        break;
+                    case GNSF:
+                        sim_gnsf_config_initialize_default(config->dynamics[i]->sim_solver);
+                        break;
+                    case LIFTED_IRK:
+                        sim_lifted_irk_config_initialize_default(config->dynamics[i]->sim_solver);
+                        break;
+                    default:
+                        printf("\nerror: ocp_nlp_config_create: unsupported plan->sim_solver\n");
+                        exit(1);
+                }
+
+                break;
+            case CONTINUOUS_MODEL_WITH_COST:
+                ocp_nlp_dynamics_cont_with_cost_config_initialize_default(config->dynamics[i], i);
+                sim_solver_t solver_name_cost = plan.sim_solver_plan[i].sim_solver;
+
+                switch (solver_name_cost)
                 {
                     case ERK:
                         sim_erk_config_initialize_default(config->dynamics[i]->sim_solver);
@@ -798,6 +801,10 @@ int ocp_nlp_dims_get_total_from_attr(ocp_nlp_config *config, ocp_nlp_dims *dims,
     {
         return dims->nh_total;
     }
+    else if (!strcmp(field, "yref") || !strcmp(field, "y_ref") || !strcmp(field, "ny"))
+    {
+        return dims->ny_total;
+    }
     else
     {
         printf("\nerror: ocp_nlp_dims_get_total_from_attr: field %s not available\n", field);
@@ -844,10 +851,6 @@ int ocp_nlp_dims_get_from_attr(ocp_nlp_config *config, ocp_nlp_dims *dims, ocp_n
     else if (!strcmp(field, "lam"))
     {
         return 2*dims->ni[stage];
-    }
-    else if (!strcmp(field, "s"))
-    {
-        return 2*dims->ns[stage];
     }
     else if (!strcmp(field, "sl") || !strcmp(field, "su") ||
              !strcmp(field, "zl") || !strcmp(field, "zu") ||
@@ -963,6 +966,10 @@ void ocp_nlp_constraint_dims_get_from_attr(ocp_nlp_config *config, ocp_nlp_dims 
         config->constraints[stage]->dims_get(config->constraints[stage], dims->constraints[stage],
                                             "ni", &dims_out[0]);
         dims_out[0] *= 2;
+    }
+    else if (!strcmp(field, "idxs_rev"))
+    {
+        dims_out[0] = dims->ni[stage] - dims->ns[stage];
     }
     // matrices
     else if (!strcmp(field, "C"))
@@ -1397,6 +1404,22 @@ void ocp_nlp_solver_reset_qp_memory(ocp_nlp_solver *solver, ocp_nlp_in *nlp_in, 
                                     solver->opts, solver->mem, solver->work);
 }
 
+void ocp_nlp_solver_reset_integrator_memory(ocp_nlp_solver *solver, ocp_nlp_in *nlp_in, ocp_nlp_out *nlp_out)
+{
+    ocp_nlp_config *config = solver->config;
+    ocp_nlp_memory *nlp_mem;
+    ocp_nlp_opts *nlp_opts;
+    ocp_nlp_workspace *nlp_work;
+    config->get(config, solver->dims, solver->mem, "nlp_mem", &nlp_mem);
+    config->opts_get(config, solver->opts, "nlp_opts", &nlp_opts);
+    config->work_get(config, solver->dims, solver->work, "nlp_work", &nlp_work);
+
+    for (int i = 0; i < solver->dims->N; i++)
+    {
+        solver->config->dynamics[i]->reset(solver->config->dynamics[i], solver->dims->dynamics[i], nlp_in->dynamics[i], nlp_opts->dynamics[i], nlp_mem->dynamics[i], nlp_work->dynamics[i]);
+    }
+}
+
 
 int ocp_nlp_solve(ocp_nlp_solver *solver, ocp_nlp_in *nlp_in, ocp_nlp_out *nlp_out)
 {
@@ -1490,7 +1513,7 @@ void ocp_nlp_eval_params_jac(ocp_nlp_solver *solver, ocp_nlp_in *nlp_in, ocp_nlp
 
 void ocp_nlp_eval_solution_sens_adj_p(ocp_nlp_solver *solver, ocp_nlp_in *nlp_in, ocp_nlp_out *sens_nlp_out, const char *field, int stage, double *out)
 {
-    solver->config->eval_solution_sens_adj_p(solver->config, solver->dims, solver->opts, solver->mem, solver->work, sens_nlp_out, field, stage, out);
+    solver->config->eval_solution_sens_adj_p(solver->config, solver->dims, nlp_in, solver->opts, solver->mem, solver->work, sens_nlp_out, field, stage, out);
 }
 
 
@@ -1499,186 +1522,6 @@ void ocp_nlp_get(ocp_nlp_solver *solver, const char *field, void *return_value_)
     solver->config->get(solver->config, solver->dims, solver->mem, field, return_value_);
 }
 
-
-
-static void get_from_qp_in(ocp_qp_in *qp_in, int stage, const char *field, void *value)
-{
-    if (!strcmp(field, "A"))
-    {
-        double *double_values = value;
-        d_ocp_qp_get_A(stage, qp_in, double_values);
-    }
-    else if (!strcmp(field, "B"))
-    {
-        double *double_values = value;
-        d_ocp_qp_get_B(stage, qp_in, double_values);
-    }
-    else if (!strcmp(field, "b"))
-    {
-        double *double_values = value;
-        d_ocp_qp_get_b(stage, qp_in, double_values);
-    }
-    else if (!strcmp(field, "Q"))
-    {
-        double *double_values = value;
-        d_ocp_qp_get_Q(stage, qp_in, double_values);
-    }
-    else if (!strcmp(field, "R"))
-    {
-        double *double_values = value;
-        d_ocp_qp_get_R(stage, qp_in, double_values);
-    }
-    else if (!strcmp(field, "S"))
-    {
-        double *double_values = value;
-        d_ocp_qp_get_S(stage, qp_in, double_values);
-    }
-    else if (!strcmp(field, "r"))
-    {
-        double *double_values = value;
-        d_ocp_qp_get_r(stage, qp_in, double_values);
-    }
-    else if (!strcmp(field, "q"))
-    {
-        double *double_values = value;
-        d_ocp_qp_get_q(stage, qp_in, double_values);
-    }
-    else if (!strcmp(field, "lbx"))
-    {
-        double *double_values = value;
-        d_ocp_qp_get_lbx(stage, qp_in, double_values);
-    }
-    else if (!strcmp(field, "ubx"))
-    {
-        double *double_values = value;
-        d_ocp_qp_get_ubx(stage, qp_in, double_values);
-    }
-    else if (!strcmp(field, "lbu"))
-    {
-        double *double_values = value;
-        d_ocp_qp_get_lbu(stage, qp_in, double_values);
-    }
-    else if (!strcmp(field, "ubu"))
-    {
-        double *double_values = value;
-        d_ocp_qp_get_ubu(stage, qp_in, double_values);
-    }
-    else if (!strcmp(field, "C"))
-    {
-        double *double_values = value;
-        d_ocp_qp_get_C(stage, qp_in, double_values);
-    }
-    else if (!strcmp(field, "D"))
-    {
-        double *double_values = value;
-        d_ocp_qp_get_D(stage, qp_in, double_values);
-    }
-    else if (!strcmp(field, "lg"))
-    {
-        double *double_values = value;
-        d_ocp_qp_get_lg(stage, qp_in, double_values);
-    }
-    else if (!strcmp(field, "ug"))
-    {
-        double *double_values = value;
-        d_ocp_qp_get_ug(stage, qp_in, double_values);
-    }
-    else if (!strcmp(field, "zl"))
-    {
-        double *double_values = value;
-        d_ocp_qp_get_zl(stage, qp_in, double_values);
-    }
-    else if (!strcmp(field, "zu"))
-    {
-        double *double_values = value;
-        d_ocp_qp_get_zu(stage, qp_in, double_values);
-    }
-    else if (!strcmp(field, "Zl"))
-    {
-        double *double_values = value;
-        d_ocp_qp_get_Zl(stage, qp_in, double_values);
-    }
-    else if (!strcmp(field, "Zu"))
-    {
-        double *double_values = value;
-        d_ocp_qp_get_Zu(stage, qp_in, double_values);
-    }
-    else if (!strcmp(field, "lls"))
-    {
-        double *double_values = value;
-        d_ocp_qp_get_lls(stage, qp_in, double_values);
-    }
-    else if (!strcmp(field, "lus"))
-    {
-        double *double_values = value;
-        d_ocp_qp_get_lus(stage, qp_in, double_values);
-    }
-    else if (!strcmp(field, "lg_mask"))
-    {
-        double *double_values = value;
-        d_ocp_qp_get_lg_mask(stage, qp_in, double_values);
-    }
-    else if (!strcmp(field, "ug_mask"))
-    {
-        double *double_values = value;
-        d_ocp_qp_get_ug_mask(stage, qp_in, double_values);
-    }
-    else if (!strcmp(field, "lbx_mask"))
-    {
-        double *double_values = value;
-        d_ocp_qp_get_lbx_mask(stage, qp_in, double_values);
-    }
-    else if (!strcmp(field, "ubx_mask"))
-    {
-        double *double_values = value;
-        d_ocp_qp_get_ubx_mask(stage, qp_in, double_values);
-    }
-    else if (!strcmp(field, "lbu_mask"))
-    {
-        double *double_values = value;
-        d_ocp_qp_get_lbu_mask(stage, qp_in, double_values);
-    }
-    else if (!strcmp(field, "ubu_mask"))
-    {
-        double *double_values = value;
-        d_ocp_qp_get_ubu_mask(stage, qp_in, double_values);
-    }
-    else if (!strcmp(field, "lls_mask"))
-    {
-        double *double_values = value;
-        d_ocp_qp_get_lls_mask(stage, qp_in, double_values);
-    }
-    else if (!strcmp(field, "lus_mask"))
-    {
-        double *double_values = value;
-        d_ocp_qp_get_lus_mask(stage, qp_in, double_values);
-    }
-    else if (!strcmp(field, "idxs"))
-    {
-        int *int_values = value;
-        d_ocp_qp_get_idxs(stage, qp_in, int_values);
-    }
-    else if (!strcmp(field, "idxs_rev"))
-    {
-        int *int_values = value;
-        d_ocp_qp_get_idxs_rev(stage, qp_in, int_values);
-    }
-    else if (!strcmp(field, "idxb"))
-    {
-        int *int_values = value;
-        d_ocp_qp_get_idxb(stage, qp_in, int_values);
-    }
-    else if (!strcmp(field, "idxe"))
-    {
-        int *int_values = value;
-        d_ocp_qp_get_idxe(stage, qp_in, int_values);
-    }
-    else
-    {
-        printf("\nerror: ocp_nlp_get_at_stage: field %s not available\n", field);
-        exit(1);
-    }
-}
 
 
 void ocp_nlp_get_at_stage(ocp_nlp_solver *solver, int stage, const char *field, void *value)
@@ -1736,7 +1579,7 @@ void ocp_nlp_get_at_stage(ocp_nlp_solver *solver, int stage, const char *field, 
             printf("\nwarning: S_p requested at terminal stage %d; returning empty.\n", stage);
         }
     }
-    else if (!strcmp(field, "ineq_fun") || !strcmp(field, "res_stat") || !strcmp(field, "res_eq"))
+    else if (!strcmp(field, "ineq_fun") || !strcmp(field, "res_stat") || !strcmp(field, "res_eq") || !strcmp(field, "cost_value") || !strcmp(field, "slack_cost_value"))
     {
         ocp_nlp_memory_get_at_stage(config, dims, nlp_mem, stage, field, value);
     }
@@ -1854,7 +1697,7 @@ void ocp_nlp_get_at_stage(ocp_nlp_solver *solver, int stage, const char *field, 
         {
             ocp_nlp_get(solver, "relaxed_qp_in", &qp_in);
             field_name_getter = field+module_length+1;
-            get_from_qp_in(qp_in, stage, field_name_getter, value);
+            ocp_qp_in_get(qp_in, stage, field_name_getter, value);
         }
         else if ( ptr_module!=NULL && (!strcmp(ptr_module, "qpscaling")) )
         {
@@ -1865,7 +1708,7 @@ void ocp_nlp_get_at_stage(ocp_nlp_solver *solver, int stage, const char *field, 
         else
         {
             qp_in = nlp_mem->qp_in;
-            get_from_qp_in(qp_in, stage, field_name_getter, value);
+            ocp_qp_in_get(qp_in, stage, field_name_getter, value);
         }
     }
 }
@@ -1985,6 +1828,13 @@ void ocp_nlp_get_all(ocp_nlp_solver *solver, ocp_nlp_in *in, ocp_nlp_out *out, c
                 double_values[tmp_offset + ii] = in->parameter_values[stage][ii];
             }
             tmp_offset += tmp_int;
+        }
+    }
+    else if (!strcmp(field, "cost_value") || !strcmp(field, "slack_cost_value"))
+    {
+        for (stage = 0; stage < N+1; stage++)
+        {
+            ocp_nlp_get_at_stage(solver, stage, field, &double_values[stage]);
         }
     }
     else
@@ -2142,213 +1992,11 @@ void ocp_nlp_set(ocp_nlp_solver *solver, int stage, const char *field, void *val
 }
 
 
-void _write_json(FILE *fp, const char *key, void *data, int rows, int cols, int *is_first, int is_int)
+void ocp_nlp_dump_last_qp_to_json(ocp_nlp_solver *solver, const char *filename)
 {
-
-    if (*is_first == 0) {
-        fprintf(fp, ",\n");
-    }
-    *is_first = 0;
-
-    fprintf(fp, "    \"%s\": [", key);
-
-    if (rows == 0 || cols == 0 || data == NULL) {
-        fprintf(fp, "]");
-        return;
-    }
-
-    fprintf(fp, "\n");
-    if (is_int)
-    {
-        for (int r = 0; r < rows; r++)
-        {
-            fprintf(fp, "        [");
-            for (int c = 0; c < cols; c++)
-            {
-                fprintf(fp, "%d", ((int*)data)[c * rows + r]);
-                if (c < cols - 1) fprintf(fp, ", ");
-            }
-            fprintf(fp, "]");
-            if (r < rows - 1) fprintf(fp, ",\n");
-        }
-    }
-    else
-    {
-        for (int r = 0; r < rows; r++)
-        {
-            fprintf(fp, "        [");
-            for (int c = 0; c < cols; c++)
-            {
-                fprintf(fp, "%.10e", ((double*)data)[c * rows + r]);
-                if (c < cols - 1) fprintf(fp, ", ");
-            }
-            fprintf(fp, "]");
-            if (r < rows - 1) fprintf(fp, ",\n");
-        }
-    }
-    fprintf(fp, "\n    ]");
-}
-
-
-void ocp_nlp_dump_last_qp_to_json(ocp_nlp_config *config, ocp_nlp_dims *dims, ocp_nlp_solver *solver, const char *filename)
-{
-
-    // char* _qp_dynamics_field[] = {"A", "B", "b"};
-    // char* _qp_cost_fields[] = {"Q", "R", "S", "q", "r", 'zl', 'zu', 'Zl', 'Zu'};
-    // char* _qp_constraint_fields[] = {'C', 'D', 'lg', 'ug', 'lbx', 'ubx', 'lbu', 'ubu', 'lls', 'lus', 'lg_mask', 'ug_mask', 'lbx_mask', 'ubx_mask', 'lbu_mask', 'ubu_mask', 'lls_mask', 'lus_mask'};
-    // char* _qp_constraint_int_fields[] = {"idxs", "idxb", "idxs_rev", "idxe"};
-    int conservative_buffer_size = (dims->nbx_total + dims->ni_total + dims->nx_total + dims->nu_total) * (dims->nbx_total + dims->ni_total + dims->nx_total + dims->nu_total);
-    void *buffer = malloc(conservative_buffer_size * sizeof(double));
-
-    char* _qp_fields[] = {"A", "B", "b",
-                          "Q", "R", "S", "q", "r",  "zl", "zu", "Zl", "Zu",
-                          "C", "D", "lg", "ug", "lbx", "ubx", "lbu", "ubu",
-                          "lls", "lus", "lg_mask", "ug_mask", "lbx_mask", "ubx_mask", "lbu_mask", "ubu_mask", "lls_mask", "lus_mask",
-                          "idxs", "idxb", "idxs_rev", "idxe"};
-
     ocp_nlp_dims *nlp_dims = solver->dims;
     ocp_nlp_config *nlp_config = solver->config;
-
     ocp_qp_in *qp_in;
     nlp_config->get(nlp_config, nlp_dims, solver->mem, "qp_in", &qp_in);
-
-    // make symmetric
-    for (int stage = 0; stage < dims->N+1; stage++)
-    {
-        // blasfeo_print_dmat(dims->nu[stage]+dims->nx[stage], dims->nu[stage]+dims->nx[stage], &(qp_in->RSQrq[stage]), 0, 0);
-        blasfeo_dtrtr_l(dims->nu[stage]+dims->nx[stage], &(qp_in->RSQrq[stage]), 0, 0, &(qp_in->RSQrq[stage]), 0, 0);
-        // blasfeo_print_dmat(dims->nu[stage]+dims->nx[stage], dims->nu[stage]+dims->nx[stage], &(qp_in->RSQrq[stage]), 0, 0);
-    }
-
-    int size1 = 0, size2 = 0;
-    int is_first = 1, is_int = 0;
-    int num_fields = sizeof(_qp_fields) / sizeof(_qp_fields[0]);
-    int width = snprintf(NULL, 0, "%d", dims->N);
-    char key[MAX_STR_LEN];
-
-    // go through fields of last QP and write to json
-    FILE *fp = fopen(filename, "w");
-    fprintf(fp, "{\n");
-    for (int i = 0; i < num_fields; i++)
-    {
-        const char *field = _qp_fields[i];
-
-        for (int stage = 0; stage < dims->N+1; stage++)
-        {
-            is_int = 0;
-            if (!strcmp(field, "A"))
-            {
-                if (stage == dims->N) continue;
-                size1 = qp_in->dim->nx[stage+1];
-                size2 = qp_in->dim->nx[stage];
-            }
-            else if (!strcmp(field, "B"))
-            {
-                if (stage == dims->N) continue;
-                size1 = qp_in->dim->nx[stage+1];
-                size2 = qp_in->dim->nu[stage];
-            }
-            else if (!strcmp(field, "b"))
-            {
-                if (stage == dims->N) continue;
-                size1 = 1;
-                size2 = qp_in->dim->nx[stage+1];
-            }
-            else if (!strcmp(field, "Q"))
-            {
-                size1 = qp_in->dim->nx[stage];
-                size2 = qp_in->dim->nx[stage];
-            }
-            else if (!strcmp(field, "R"))
-            {
-                size1 = qp_in->dim->nu[stage];
-                size2 = qp_in->dim->nu[stage];
-            }
-            else if (!strcmp(field, "S"))
-            {
-                size1 = qp_in->dim->nu[stage];
-                size2 = qp_in->dim->nx[stage];
-            }
-            else if (!strcmp(field, "q"))
-            {
-                size1 = 1;
-                size2 = qp_in->dim->nx[stage];
-            }
-            else if (!strcmp(field, "r"))
-            {
-                size1 = 1;
-                size2 = qp_in->dim->nu[stage];
-            }
-            else if (!strcmp(field, "zl") || !strcmp(field, "zu") || !strcmp(field, "Zl") || !strcmp(field, "Zu"))
-            {
-                size1 = qp_in->dim->ns[stage];
-                size2 = 1;
-            }
-            else if (!strcmp(field, "C"))
-            {
-                size1 = qp_in->dim->ng[stage];
-                size2 = qp_in->dim->nx[stage];
-            }
-            else if (!strcmp(field, "D"))
-            {
-                size1 = qp_in->dim->ng[stage];
-                size2 = qp_in->dim->nu[stage];
-            }
-            else if (!strcmp(field, "lg") || !strcmp(field, "ug") || !strcmp(field, "lg_mask") || !strcmp(field, "ug_mask"))
-            {
-                size1 = qp_in->dim->ng[stage];
-                size2 = 1;
-            }
-            else if (!strcmp(field, "lbx") || !strcmp(field, "ubx") || !strcmp(field, "lbx_mask") || !strcmp(field, "ubx_mask"))
-            {
-                size1 = qp_in->dim->nbx[stage];
-                size2 = 1;
-            }
-            else if (!strcmp(field, "lbu") || !strcmp(field, "ubu") || !strcmp(field, "lbu_mask") || !strcmp(field, "ubu_mask"))
-            {
-                size1 = qp_in->dim->nbu[stage];
-                size2 = 1;
-            }
-            else if (!strcmp(field, "lls") || !strcmp(field, "lus") || !strcmp(field, "lls_mask") || !strcmp(field, "lus_mask"))
-            {
-                size1 = qp_in->dim->ns[stage];
-                size2 = 1;
-            }
-            else if (!strcmp(field, "idxs"))
-            {
-                size1 = qp_in->dim->ns[stage];
-                size2 = 1;
-                is_int = 1;
-            }
-            else if (!strcmp(field, "idxb"))
-            {
-                size1 = qp_in->dim->nbu[stage] + qp_in->dim->nbx[stage];
-                size2 = 1;
-                is_int = 1;
-            }
-            else if (!strcmp(field, "idxs_rev"))
-            {
-                size1 = 1;
-                size2 = qp_in->dim->nb[stage] + qp_in->dim->ng[stage];
-                is_int = 1;
-            }
-            else if (!strcmp(field, "idxe"))
-            {
-                size1 = qp_in->dim->nbxe[stage] + qp_in->dim->nbue[stage] + qp_in->dim->nge[stage];
-                size2 = 1;
-                is_int = 1;
-            }
-
-            if (size1 * size2 == 0)
-                continue;
-
-            get_from_qp_in(qp_in, stage, field, buffer);
-            snprintf(key, sizeof(key), "%s_%0*d", field, width, stage);
-            _write_json(fp, key, buffer, size1, size2, &is_first, is_int);
-        }
-    }
-    // End JSON object
-    fprintf(fp, "\n}\n");
-    fclose(fp);
-    free(buffer);
+    ocp_qp_in_dump_to_json(qp_in, filename);
 }

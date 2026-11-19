@@ -3,29 +3,7 @@
  *
  * This file is part of acados.
  *
- * The 2-Clause BSD License
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright notice,
- * this list of conditions and the following disclaimer.
- *
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- * this list of conditions and the following disclaimer in the documentation
- * and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.;
+ * Licensed under the 2-Clause BSD License.
  */
 
 
@@ -250,25 +228,25 @@ acados_size_t dense_qp_qpoases_memory_calculate_size(void *config_, dense_qp_dim
     size += 1 * nv2 * nv2 * sizeof(double);    // HH
     size += 1 * nv2 * nv2 * sizeof(double);    // R
     size += 1 * nv2 * ne * sizeof(double);     // A
-    size += 1 * nv * ng * sizeof(double);      // C
-    size += 1 * nv2 * ng2 * sizeof(double);    // CC
+    size += 1 * nv * (ng + ne) * sizeof(double);    // C
+    size += 1 * nv2 * (ng2 + ne) * sizeof(double);  // CC
     size += 1 * nv * sizeof(double);           // g
     size += 1 * nv2 * sizeof(double);          // gg
     size += 2 * nv2 * sizeof(double);          // d_lb d_ub
     size += 1 * ne * sizeof(double);           // b
     size += 2 * nb2 * sizeof(double);          // d_lb0 d_ub0
-    size += 2 * ng * sizeof(double);           // d_lg0 d_ug0
-    size += 2 * ng2 * sizeof(double);          // d_lg d_ug
+    size += 2 * (ng + ne) * sizeof(double);    // d_lg0 d_ug0
+    size += 2 * (ng2 + ne) * sizeof(double);   // d_lg d_ug
     size += 1 * nb * sizeof(int);              // idxb
     size += 1 * nb2 * sizeof(int);             // idxb_stacked
     size += 1 * (nb+ng) * sizeof(int); // idxs_rev
     size += 1 * ns * sizeof(int);              // idxs
     size += 1 * nv2 * sizeof(double);          // prim_sol
-    size += 1 * (nv2 + ng2) * sizeof(double);  // dual_sol
+    size += 1 * (nv2 + ng2 + ne) * sizeof(double);  // dual_sol
     size += 6 * ns * sizeof(double);           // Zl, Zu, zl, zu, d_ls, d_us
 
-    if (ng > 0 || ns > 0)  // QProblem
-        size += QProblem_calculateMemorySize(nv2, ng2);
+    if (ng > 0 || ns > 0 || ne > 0)  // QProblem
+        size += QProblem_calculateMemorySize(nv2, ng2 + ne);
     else  // QProblemB
         size += QProblemB_calculateMemorySize(nv);
 
@@ -324,8 +302,8 @@ void *dense_qp_qpoases_memory_assign(void *config_, dense_qp_dims *dims, void *o
     assign_and_advance_double(nv2 * nv2, &mem->HH, &c_ptr);
     assign_and_advance_double(nv2 * nv2, &mem->R, &c_ptr);
     assign_and_advance_double(nv2 * ne, &mem->A, &c_ptr);
-    assign_and_advance_double(nv * ng, &mem->C, &c_ptr);
-    assign_and_advance_double(nv2 * ng2, &mem->CC, &c_ptr);
+    assign_and_advance_double(nv * (ng + ne), &mem->C, &c_ptr);
+    assign_and_advance_double(nv2 * (ng2 + ne), &mem->CC, &c_ptr);
     assign_and_advance_double(nv, &mem->g, &c_ptr);
     assign_and_advance_double(nv2, &mem->gg, &c_ptr);
     assign_and_advance_double(ne, &mem->b, &c_ptr);
@@ -333,10 +311,10 @@ void *dense_qp_qpoases_memory_assign(void *config_, dense_qp_dims *dims, void *o
     assign_and_advance_double(nb2, &mem->d_ub0, &c_ptr);
     assign_and_advance_double(nv2, &mem->d_lb, &c_ptr);
     assign_and_advance_double(nv2, &mem->d_ub, &c_ptr);
-    assign_and_advance_double(ng, &mem->d_lg0, &c_ptr);
-    assign_and_advance_double(ng, &mem->d_ug0, &c_ptr);
-    assign_and_advance_double(ng2, &mem->d_lg, &c_ptr);
-    assign_and_advance_double(ng2, &mem->d_ug, &c_ptr);
+    assign_and_advance_double(ng + ne, &mem->d_lg0, &c_ptr);
+    assign_and_advance_double(ng + ne, &mem->d_ug0, &c_ptr);
+    assign_and_advance_double(ng2 + ne, &mem->d_lg, &c_ptr);
+    assign_and_advance_double(ng2 + ne, &mem->d_ug, &c_ptr);
     assign_and_advance_double(ns, &mem->d_ls, &c_ptr);
     assign_and_advance_double(ns, &mem->d_us, &c_ptr);
     assign_and_advance_double(ns, &mem->Zl, &c_ptr);
@@ -344,15 +322,15 @@ void *dense_qp_qpoases_memory_assign(void *config_, dense_qp_dims *dims, void *o
     assign_and_advance_double(ns, &mem->zl, &c_ptr);
     assign_and_advance_double(ns, &mem->zu, &c_ptr);
     assign_and_advance_double(nv2, &mem->prim_sol, &c_ptr);
-    assign_and_advance_double(nv2 + ng2, &mem->dual_sol, &c_ptr);
+    assign_and_advance_double(nv2 + ng2 + ne, &mem->dual_sol, &c_ptr);
 
     // TODO(dimitris): update assign syntax in qpOASES
     assert((size_t) c_ptr % 8 == 0 && "double not 8-byte aligned!");
 
-    if (ng > 0 || ns > 0)
+    if (ng > 0 || ns > 0 || ne > 0)
     {  // QProblem
-        QProblem_assignMemory(nv2, ng2, (QProblem **) &(mem->QP), c_ptr);
-        c_ptr += QProblem_calculateMemorySize(nv2, ng2);
+        QProblem_assignMemory(nv2, ng2 + ne, (QProblem **) &(mem->QP), c_ptr);
+        c_ptr += QProblem_calculateMemorySize(nv2, ng2 + ne);
     }
     else
     {  // QProblemB
@@ -418,6 +396,38 @@ acados_size_t dense_qp_qpoases_workspace_calculate_size(void *config_, dense_qp_
  * functions
  ************************************************/
 
+// set bounds of masked constraints to -/+QPOASES_INFTY, i.e. to not present for qpOASES
+static void set_masked_bounds_to_infty(dense_qp_in *qp, double *d_lb, double *d_ub, double *d_lg, double *d_ug)
+{
+    int nb = qp->dim->nb;
+    int ng = qp->dim->ng;
+
+    for (int ii = 0; ii < nb; ii++)
+    {
+        if (BLASFEO_DVECEL(qp->d_mask, ii) == 0.0)
+        {
+            d_lb[ii] = -QPOASES_INFTY;
+        }
+        if (BLASFEO_DVECEL(qp->d_mask, nb+ng+ii) == 0.0)
+        {
+            d_ub[ii] = QPOASES_INFTY;
+        }
+    }
+    for (int ii = 0; ii < ng; ii++)
+    {
+        if (BLASFEO_DVECEL(qp->d_mask, nb+ii) == 0.0)
+        {
+            d_lg[ii] = -QPOASES_INFTY;
+        }
+        if (BLASFEO_DVECEL(qp->d_mask, 2*nb+ng+ii) == 0.0)
+        {
+            d_ug[ii] = QPOASES_INFTY;
+        }
+    }
+}
+
+
+
 int dense_qp_qpoases(void *config_, dense_qp_in *qp_in, dense_qp_out *qp_out, void *opts_,
                      void *memory_, void *work_)
 {
@@ -467,12 +477,12 @@ int dense_qp_qpoases(void *config_, dense_qp_in *qp_in, dense_qp_out *qp_out, vo
 
     // extract dense qp size
     int nv = qp_in->dim->nv;
-    // int ne = qp_in->dim->ne;
+    int ne = qp_in->dim->ne;
     int ng = qp_in->dim->ng;
     int nb = qp_in->dim->nb;
     int ns = qp_in->dim->ns;
 
-    int ng2, nv2, nb2;
+    int ng2, nv2, nb2, nc2;
 
     // fill in the upper triangular of H in dense_qp
     blasfeo_dtrtr_l(nv, qp_in->Hv, 0, 0, qp_in->Hv, 0, 0);
@@ -494,6 +504,7 @@ int dense_qp_qpoases(void *config_, dense_qp_in *qp_in, dense_qp_out *qp_out, vo
         nv2 = nv;
         nb2 = nb;
     }
+    nc2 = ng2 + ne;
 
     // reorder box constraints bounds
     for (int ii = 0; ii < nv2; ii++)
@@ -507,19 +518,85 @@ int dense_qp_qpoases(void *config_, dense_qp_in *qp_in, dense_qp_out *qp_out, vo
         dense_qp_stack_slacks(qp_in, qp_stacked);
         d_dense_qp_get_all_rowmaj(qp_stacked, HH, gg, A, b, idxb_stacked, d_lb0, d_ub0, CC, d_lg,
             d_ug, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+        set_masked_bounds_to_infty(qp_stacked, d_lb0, d_ub0, d_lg, d_ug);
 
         for (int ii = 0; ii < nb2; ii++)
         {
             d_lb[idxb_stacked[ii]] = d_lb0[ii];
             d_ub[idxb_stacked[ii]] = d_ub0[ii];
         }
+
+        // equality constraints as b <= A v <= b
+        for (int ii = 0; ii < ne * nv2; ii++)
+        {
+            CC[ng2 * nv2 + ii] = A[ii];
+        }
+        for (int ii = 0; ii < ne; ii++)
+        {
+            d_lg[ng2 + ii] = b[ii];
+            d_ug[ng2 + ii] = b[ii];
+        }
     }
     else
     {
+        set_masked_bounds_to_infty(qp_in, d_lb0, d_ub0, d_lg0, d_ug0);
+
         for (int ii = 0; ii < nb; ii++)
         {
             d_lb[idxb[ii]] = d_lb0[ii];
             d_ub[idxb[ii]] = d_ub0[ii];
+        }
+
+        // equality constraints as b <= A v <= b
+        for (int ii = 0; ii < ne * nv; ii++)
+        {
+            C[ng * nv + ii] = A[ii];
+        }
+        for (int ii = 0; ii < ne; ii++)
+        {
+            d_lg0[ng + ii] = b[ii];
+            d_ug0[ng + ii] = b[ii];
+        }
+    }
+
+    // remove constraints which are not present anymore, e.g. masked ones, from the warm start guess
+    if (opts->warm_start && !opts->hotstart)
+    {
+        // bounds of the general constraints as passed to qpOASES
+        double *d_lg_solve;
+        double *d_ug_solve;
+        if (ns > 0)
+        {
+            d_lg_solve = d_lg;
+            d_ug_solve = d_ug;
+        }
+        else
+        {
+            d_lg_solve = d_lg0;
+            d_ug_solve = d_ug0;
+        }
+
+        for (int ii = 0; ii < nv2; ii++)
+        {
+            if (dual_sol[ii] > 0.0 && d_lb[ii] <= -QPOASES_INFTY)
+            {
+                dual_sol[ii] = 0.0;
+            }
+            else if (dual_sol[ii] < 0.0 && d_ub[ii] >= QPOASES_INFTY)
+            {
+                dual_sol[ii] = 0.0;
+            }
+        }
+        for (int ii = 0; ii < ng2; ii++)
+        {
+            if (dual_sol[nv2+ii] > 0.0 && d_lg_solve[ii] <= -QPOASES_INFTY)
+            {
+                dual_sol[nv2+ii] = 0.0;
+            }
+            else if (dual_sol[nv2+ii] < 0.0 && d_ug_solve[ii] >= QPOASES_INFTY)
+            {
+                dual_sol[nv2+ii] = 0.0;
+            }
         }
     }
 
@@ -542,11 +619,11 @@ int dense_qp_qpoases(void *config_, dense_qp_in *qp_in, dense_qp_out *qp_out, vo
     int qpoases_status = 0;
     if (opts->hotstart == 1)
     {  // only to be used with fixed data matrices!
-        if (ng > 0 || ns > 0)
+        if (ng > 0 || ns > 0 || ne > 0)
         {  // QProblem
             if (memory->first_it == 1)
             {
-                QProblemCON(QP, nv2, ng2, HST_POSDEF);
+                QProblemCON(QP, nv2, nc2, HST_POSDEF);
                 QProblem_setPrintLevel(QP, PL_MEDIUM);
                 // QProblem_setPrintLevel(QP, PL_DEBUG_ITER);
                 if (opts->set_acado_opts)
@@ -606,9 +683,9 @@ int dense_qp_qpoases(void *config_, dense_qp_in *qp_in, dense_qp_out *qp_out, vo
     }
     else
     {  // hotstart = 0
-        if (ng > 0 || ns > 0)
+        if (ng > 0 || ns > 0 || ne > 0)
         {
-            QProblemCON(QP, nv2, ng2, HST_POSDEF);
+            QProblemCON(QP, nv2, nc2, HST_POSDEF);
             // QProblem_setPrintLevel(QP, PL_HIGH);
             QProblem_setPrintLevel(QP, PL_DEBUG_ITER);
             QProblem_printProperties(QP);
@@ -728,6 +805,10 @@ int dense_qp_qpoases(void *config_, dense_qp_in *qp_in, dense_qp_out *qp_out, vo
         else
             qp_out->lam->pa[2 * nb + ng + ii] = -dual_sol[nv2 + ii];
     }
+
+    // equality multipliers
+    if (ne > 0)
+        blasfeo_pack_dvec(ne, dual_sol + nv2 + ng2, 1, qp_out->pi, 0);
 
     int k = 0;
     for (int ii = 0; ii < ns; ii++)

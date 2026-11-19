@@ -3,29 +3,7 @@
  *
  * This file is part of acados.
  *
- * The 2-Clause BSD License
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright notice,
- * this list of conditions and the following disclaimer.
- *
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- * this list of conditions and the following disclaimer in the documentation
- * and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.;
+ * Licensed under the 2-Clause BSD License.
  */
 
 
@@ -574,6 +552,8 @@ void dense_qp_stack_slacks(dense_qp_in *in, dense_qp_in *out)
                     BLASFEO_DMATEL(out->Ct, idx_v_us1, col_b) = -1.0;
                     BLASFEO_DVECEL(out->d, idx_d_ls1) = BLASFEO_DVECEL(in->d, idx_d_ls0);
                     BLASFEO_DVECEL(out->d, idx_d_us1) = -BLASFEO_DVECEL(in->d, idx_d_us0);
+                    BLASFEO_DVECEL(out->d_mask, idx_d_ls1) = BLASFEO_DVECEL(in->d_mask, idx_d_ls0);
+                    BLASFEO_DVECEL(out->d_mask, idx_d_us1) = BLASFEO_DVECEL(in->d_mask, idx_d_us0);
 
                     col_b++;
                 }
@@ -601,7 +581,9 @@ void dense_qp_stack_slacks(dense_qp_in *in, dense_qp_in *out)
                 // copy nonsoftened box constraint bounds to out->d
                 BLASFEO_DVECEL(out->d, k_nsb) = BLASFEO_DVECEL(in->d, ii);
                 BLASFEO_DVECEL(out->d, nb2+ng2+k_nsb) = -BLASFEO_DVECEL(in->d, nb+ng+ii);
-                out->idxb[k_nsb] = ii;
+                BLASFEO_DVECEL(out->d_mask, k_nsb) = BLASFEO_DVECEL(in->d_mask, ii);
+                BLASFEO_DVECEL(out->d_mask, nb2+ng2+k_nsb) = BLASFEO_DVECEL(in->d_mask, nb+ng+ii);
+                out->idxb[k_nsb] = idxb[ii];
                 k_nsb++;
             }
         }
@@ -610,15 +592,20 @@ void dense_qp_stack_slacks(dense_qp_in *in, dense_qp_in *out)
 
         // copy ls and us to out->lb, jump over nonsoftened box constraints
         blasfeo_dveccp(2*ns, in->d, 2*nb+2*ng, out->d, k_nsb);
+        // keep ls and us also if masked: with both slacks in one row, an unbounded slack would relax the other side
+        blasfeo_dvecse(2*ns, 1.0, out->d_mask, k_nsb);
 
-        // for slack variables out->ub is +INFTY
-        blasfeo_dvecse(2*ns, 1.0e6, out->d, nb2+ng2+k_nsb);
+        // for slack variables out->ub is +INFTY and mask them in out->d_mask
+        blasfeo_dvecse(2*ns, ACADOS_INFTY, out->d, nb2+ng2+k_nsb);
+        blasfeo_dvecse(2*ns, 0.0, out->d_mask, nb2+ng2+k_nsb);
 
         // copy in->lg to out->lg
         blasfeo_dveccp(ng, in->d, nb, out->d, nb2);
+        blasfeo_dveccp(ng, in->d_mask, nb, out->d_mask, nb2);
 
         // copy in->ug to out->ug
         blasfeo_dveccpsc(ng, -1.0, in->d, 2*nb+ng, out->d, 2*nb2+ng2);
+        blasfeo_dveccp(ng, in->d_mask, 2*nb+ng, out->d_mask, 2*nb2+ng2);
 
         // flip signs for ub and ug
         blasfeo_dvecsc(nb2+ng2, -1.0, out->d, nb2+ng2);
@@ -629,6 +616,7 @@ void dense_qp_stack_slacks(dense_qp_in *in, dense_qp_in *out)
     else
     {
         blasfeo_dveccp(2*nb+2*ng, in->d, 0, out->d, 0);
+        blasfeo_dveccp(2*nb+2*ng, in->d_mask, 0, out->d_mask, 0);
         blasfeo_dveccp(2*nb+2*ng, in->m, 0, out->m, 0);
         for (int ii = 0; ii < nb; ii++) out->idxb[ii] = in->idxb[ii];
     }

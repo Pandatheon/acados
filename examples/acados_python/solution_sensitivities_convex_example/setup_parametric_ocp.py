@@ -3,57 +3,65 @@
 #
 # This file is part of acados.
 #
-# The 2-Clause BSD License
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#
-# 1. Redistributions of source code must retain the above copyright notice,
-# this list of conditions and the following disclaimer.
-#
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-# this list of conditions and the following disclaimer in the documentation
-# and/or other materials provided with the distribution.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-# POSSIBILITY OF SUCH DAMAGE.;
+# Licensed under the 2-Clause BSD License.
 
 import numpy as np
 from acados_template import AcadosModel, AcadosOcp
-from casadi.tools import entry, struct_symSX
 import casadi as ca
 from typing import Optional
 
-PARAM_VALUE_DICT = {
-    "A": np.array([[1.0, 0.25], [0.0, 1.0]]),
-    "B": np.array([[0.03125], [0.25]]),
-    "Q": np.identity(2),
-    "R": np.identity(1),
-    "b": np.array([[0.2], [0.2]]),
-    "f": np.array([[0.0], [0.0], [0.0]]),
-    "V_0": np.array([1e-3]),
-}
+import sys
+sys.path.insert(0, '../chain_mass')
+from param_utils import ParamLayout, ParamVector
 
 
-def find_param_in_p_or_p_global(param_name: list[str], model: AcadosModel) -> list:
-    if model.p == []:
-        return {key: model.p_global[key] for key in param_name}
-    elif model.p_global is None:
-        return {key: model.p[key] for key in param_name}
-    else:
-        return {
-            key: (model.p[key] if key in model.p.keys() else model.p_global[key])
-            for key in param_name
-        }
+USE_MX = False
+
+def get_default_param_values(nx: int, nu: int) -> dict:
+    """Return default parameter values for a stable LTI system of size nx, nu.
+
+    A is Schur-stable with small subdiagonal coupling (non-identity).
+    B maps each input to its corresponding state.
+    """
+    # stable A
+    A = 0.99 * np.eye(nx) + 0.1 * np.diag(np.ones(nx - 1), -1)
+    # B: each input directly drives one state, scaled so the system is well-conditioned
+    B = np.zeros((nx, nu))
+    for i in range(min(nx, nu)):
+        B[i, i] = 1.0
+    if nx > nu:
+        # remaining states driven by last input with smaller gain
+        for i in range(nu, nx):
+            B[i, nu - 1] += 0.2 + 0.01 * i
+    return {
+        "A": A,
+        "B": B,
+        "Q": np.eye(nx),
+        "R": np.eye(nu),
+        "b": 0.001 * np.ones((nx, 1)),
+        "f": np.zeros((nx + nu, 1)),
+        "V_0": np.array([1e-3]),
+    }
+
+
+def find_param_in_p_or_p_global(param_name: list[str], model: AcadosModel) -> dict:
+    result = {}
+
+    # Check p_global first if it exists
+    if model.p_global is not None and hasattr(model, '_p_global_layout'):
+        p_global_vec = ParamVector(model._p_global_layout, model.p_global)
+        for key in param_name:
+            if key in model._p_global_layout._offsets:
+                result[key] = p_global_vec[key]
+
+    # Check p for remaining parameters
+    if model.p is not None and hasattr(model, '_p_layout'):
+        p_vec = ParamVector(model._p_layout, model.p)
+        for key in param_name:
+            if key not in result and key in model._p_layout._offsets:
+                result[key] = p_vec[key]
+
+    return result
 
 
 def disc_dyn_expr(model: AcadosModel):
@@ -85,7 +93,9 @@ def cost_expr_ext_cost_e(model: AcadosModel):
 
 
 def export_parametric_ocp(
-    param: dict[str, np.ndarray],
+    nx: int,
+    nu: int,
+    param: Optional[dict[str, np.ndarray]] = None,
     name: str = "lti",
     learnable_params: Optional[list[str]] = None,
 ) -> AcadosOcp:
@@ -93,24 +103,36 @@ def export_parametric_ocp(
     if learnable_params is None:
         learnable_params = []
 
+    if param is None:
+        param = get_default_param_values(nx, nu)
+
     ocp = AcadosOcp()
 
     ocp.model.name = name
 
-    ocp.model.x = ca.SX.sym("x", 2)
-    ocp.model.u = ca.SX.sym("u", 1)
+    if USE_MX:
+        symbol = ca.MX.sym
+    else:
+        symbol = ca.SX.sym
 
-    ocp.solver_options.N_horizon = 4
+    ocp.model.x = symbol("x", nx)
+    ocp.model.u = symbol("u", nu)
+
+    ocp.solver_options.N_horizon = 20
     ocp.solver_options.tf = 8
     ocp.solver_options.integrator_type = 'DISCRETE'
     ocp.solver_options.hessian_approx = 'EXACT'
     ocp.solver_options.nlp_solver_type = "SQP"
+    ocp.solver_options.with_batch_functionality = True
 
     # Add learnable parameters to p_global
     if len(learnable_params) != 0:
-        ocp.model.p_global = struct_symSX(
-            [entry(key, shape=param[key].shape) for key in learnable_params]
+        p_global_layout = ParamLayout(
+            [{'name': key, 'shape': param[key].shape} for key in learnable_params]
         )
+        p_global_sym = symbol('p_global', p_global_layout.size, 1)
+        ocp.model.p_global = p_global_sym
+        ocp.model._p_global_layout = p_global_layout
         ocp.p_global_values = np.concatenate(
             [param[key].T.reshape(-1, 1) for key in learnable_params]
         ).flatten()
@@ -118,9 +140,12 @@ def export_parametric_ocp(
     # Add non_learnable parameters to p (stage-wise parameters)
     non_learnable_params = [key for key in param.keys() if key not in learnable_params]
     if len(non_learnable_params) != 0:
-        ocp.model.p = struct_symSX(
-            [entry(key, shape=param[key].shape) for key in non_learnable_params]
+        p_layout = ParamLayout(
+            [{'name': key, 'shape': param[key].shape} for key in non_learnable_params]
         )
+        p_sym = symbol('p', p_layout.size, 1)
+        ocp.model.p = p_sym
+        ocp.model._p_layout = p_layout
         ocp.parameter_values = np.concatenate(
             [param[key].T.reshape(-1, 1) for key in non_learnable_params]
         ).flatten()
@@ -139,29 +164,18 @@ def export_parametric_ocp(
     ocp.cost.cost_type_e = "EXTERNAL"
     ocp.model.cost_expr_ext_cost_e = cost_expr_ext_cost_e(ocp.model)
 
-    ocp.constraints.idxbx_0 = np.array([0, 1])
-    ocp.constraints.lbx_0 = np.array([-1.0, -1.0])
-    ocp.constraints.ubx_0 = np.array([1.0, 1.0])
+    # initial state dummy equality
+    ocp.constraints.x0 = np.ones(nx)
 
-    ocp.constraints.idxbx = np.array([0, 1])
-    ocp.constraints.lbx = np.array([-0.0, -1.0])
-    ocp.constraints.ubx = np.array([+1.0, +1.0])
+    # # path state bounds
+    # ocp.constraints.idxbx = np.arange(nx)
+    # ocp.constraints.lbx = -np.ones(nx)
+    # ocp.constraints.ubx = np.ones(nx)
 
-    ocp.constraints.idxsbx = np.array([0])
-    ocp.cost.zl = np.array([1e2])
-    ocp.cost.zu = np.array([1e2])
-    ocp.cost.Zl = np.diag([0])
-    ocp.cost.Zu = np.diag([0])
-
-    ocp.constraints.idxbu = np.array([0])
-    ocp.constraints.lbu = np.array([-1.0])
-    ocp.constraints.ubu = np.array([+1.0])
-
-    if isinstance(ocp.model.p, struct_symSX):
-        ocp.model.p = ocp.model.p.cat if ocp.model.p is not None else []
-    if isinstance(ocp.model.p_global, struct_symSX):
-        ocp.model.p_global = (
-            ocp.model.p_global.cat if ocp.model.p_global is not None else None
-        )
+    # Control bounds
+    umax = 1e0
+    ocp.constraints.idxbu = np.arange(nu)
+    ocp.constraints.lbu = -umax * np.ones(nu)
+    ocp.constraints.ubu = umax * np.ones(nu)
 
     return ocp

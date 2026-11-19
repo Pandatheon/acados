@@ -3,29 +3,7 @@
  *
  * This file is part of acados.
  *
- * The 2-Clause BSD License
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright notice,
- * this list of conditions and the following disclaimer.
- *
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- * this list of conditions and the following disclaimer in the documentation
- * and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.;
+ * Licensed under the 2-Clause BSD License.
  */
 
 
@@ -506,6 +484,18 @@ void ocp_nlp_qpscaling_compute_obj_scaling_factor(ocp_nlp_qpscaling_dims *dims, 
         // norm gradient
         blasfeo_dvecnrm_inf(nx[stage]+nu[stage]+2*ns[stage], qp_in->rqz+stage, 0, &tmp);
         nrm_inf_grad_obj = MAX(nrm_inf_grad_obj, fabs(tmp));
+    }
+
+    if (max_abs_eig == 0.0 && nrm_inf_grad_obj == 0.0)
+    {
+        // zero objective (e.g. a feasibility problem): there is nothing to scale,
+        // and the factors below would divide by zero
+        mem->obj_factor = 1.0;
+        if (opts->print_level > 0)
+        {
+            printf("Scaling factor objective: %.2e (zero objective)\n", mem->obj_factor);
+        }
+        return;
     }
 
     if (max_abs_eig < opts->ub_max_abs_eig)

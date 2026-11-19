@@ -3,30 +3,7 @@
 #
 # This file is part of acados.
 #
-# The 2-Clause BSD License
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#
-# 1. Redistributions of source code must retain the above copyright notice,
-# this list of conditions and the following disclaimer.
-#
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-# this list of conditions and the following disclaimer in the documentation
-# and/or other materials provided with the distribution.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-# POSSIBILITY OF SUCH DAMAGE.;
-#
+# Licensed under the 2-Clause BSD License.
 # cython: language_level=3
 # cython: profile=False
 # distutils: language=c
@@ -45,6 +22,7 @@ import os
 import time
 from datetime import datetime
 import numpy as np
+from acados_template.acados_ocp_iterate import AcadosOcpIterate
 
 
 cdef class AcadosOcpSolverCython:
@@ -63,7 +41,7 @@ cdef class AcadosOcpSolverCython:
 
     cdef bint solver_created
 
-    cdef str model_name
+    cdef str name
     cdef int N
     cdef int status
     cdef double time_solution_sens_lin
@@ -71,15 +49,17 @@ cdef class AcadosOcpSolverCython:
     cdef double time_value_grad
 
     cdef str nlp_solver_type
+    cdef bint store_iterates
 
-    def __cinit__(self, model_name, nlp_solver_type, N):
+    def __cinit__(self, name, nlp_solver_type, N, store_iterates=False):
 
         self.solver_created = False
 
-        # TODO make N, model_name, status, etc. properties
+        # TODO make N, name, status, etc. properties
         self.N = N
-        self.model_name = model_name
+        self.name = name
         self.nlp_solver_type = nlp_solver_type
+        self.store_iterates = store_iterates
 
         # create capsule
         self.capsule = acados_solver.acados_create_capsule()
@@ -140,11 +120,19 @@ cdef class AcadosOcpSolverCython:
     def get_status(self):
         return self.status
 
-    def reset(self, reset_qp_solver_mem=1):
+    def reset(self, reset_qp_solver_mem: bool = True, reset_numerical_values: bool = False, reset_solver_options: bool = False, reset_x_to_x0_bar: bool = False):
         """
-        Sets current iterate to all zeros.
-        """
-        return acados_solver.acados_reset(self.capsule, reset_qp_solver_mem)
+        Reset the solver.
+        A reset sets all primal-dual iterates as well as the internal memory of the integrators to zero.
+        Additional behavior can be specified with the reset flags:
+
+        reset_qp_solver_mem: reset the memory of the QP solver, only implemented for HPIPM. Default: True.
+        reset_numerical_values: reset all numerical values including the parameters to the ones specified in the initial OCP description. Default: False.
+        reset_solver_options: reset all solver options to the ones specified in the initial OCP description. Default: False.
+        reset_x_to_x0_bar: reset the state trajectory to x0_bar (this can be used only if there is an initial state constraint, internally lbx_0 is used for the reset). For MOCPs with varying state dimension, this uses the first nx[i] entries of lbx_0 for setting x at stage i.
+
+        NOTE: First, the numerical values are reset, then x is set to x0_bar.        """
+        return acados_solver.acados_reset(self.capsule, reset_qp_solver_mem, reset_numerical_values, reset_solver_options, reset_x_to_x0_bar)
 
 
     def custom_update(self, data_):
@@ -477,12 +465,12 @@ cdef class AcadosOcpSolverCython:
         """
         Stores the current iterate of the ocp solver in a json file.
 
-            :param filename: if not set, use model_name + timestamp + '.json'
+            :param filename: if not set, use name + timestamp + '.json'
             :param overwrite: if false and filename exists add timestamp to filename
         """
         import json
         if filename == '':
-            filename += self.model_name + '_' + 'iterate' + '.json'
+            filename += self.name + '_' + 'iterate' + '.json'
 
         if not overwrite:
             # append timestamp
@@ -539,7 +527,7 @@ cdef class AcadosOcpSolverCython:
         """
         Get the information of the last solver call.
 
-            :param field: string in ['statistics', 'time_tot', 'time_lin', 'time_sim', 'time_sim_ad', 'time_sim_la', 'time_qp', 'time_qp_solver_call', 'time_reg', 'sqp_iter']
+            :param field: string in ['statistics', 'time_tot', 'time_lin', 'time_sim', 'time_sim_ad', 'time_sim_la', 'time_qp', 'time_qp_solver_call', 'time_reg', 'nlp_iter', 'sqp_iter']
         Available fileds:
             - time_tot: total CPU time previous call
             - time_lin: CPU time for linearization
@@ -552,6 +540,7 @@ cdef class AcadosOcpSolverCython:
             - time_solution_sensitivities: CPU time for previous call to eval_param_sens
             - time_reg: CPU time regularization
             - sqp_iter: number of SQP iterations
+            - nlp_iter: number of NLP solver iterations
             - qp_iter: vector of QP iterations for last SQP call
             - statistics: table with info about last iteration
             - stat_m: number of rows in statistics matrix
@@ -573,6 +562,7 @@ cdef class AcadosOcpSolverCython:
                   'time_reg'
         ]
         fields = double_fields + [
+                  'nlp_iter',
                   'sqp_iter',
                   'qp_iter',
                   'statistics',
@@ -583,7 +573,7 @@ cdef class AcadosOcpSolverCython:
                 ]
         field = field_.encode('utf-8')
 
-        if field_ in ['sqp_iter', 'stat_m', 'stat_n']:
+        if field_ in ['nlp_iter', 'sqp_iter', 'stat_m', 'stat_n']:
             return self.__get_stat_int(field)
 
         elif field_ in double_fields:
@@ -617,6 +607,43 @@ cdef class AcadosOcpSolverCython:
             raise NotImplementedError("TODO!")
 
 
+    def get_iterate(self, int iteration=-1) -> AcadosOcpIterate:
+        """
+        Returns the solver iterate from a given iteration (use -1 for the final one).
+        If iterates other than the final one are requested, the ``store_iterates`` option must be set to True.
+        """
+        nlp_iter = self.get_stats('nlp_iter')
+        get_final_iterate = iteration == -1 or iteration == nlp_iter
+
+        if not get_final_iterate and (iteration > nlp_iter or iteration < 0):
+            raise ValueError("get_iterate: iteration needs to be nonnegative and <= nlp_iter or -1.")
+
+        if not get_final_iterate and not self.store_iterates:
+            raise ValueError("get_iterate: the solver option store_iterates needs to be true in order to get intermediate iterates.")
+
+        if not get_final_iterate and self.nlp_solver_type == "SQP_RTI":
+            raise NotImplementedError("get_iterate: SQP_RTI not supported.")
+
+        data = {}
+        for field in ["x", "u", "z", "sl", "su", "pi", "lam"]:
+            trajectory = []
+            for stage in range(self.N + 1):
+                if stage < self.N or field not in ["u", "pi", "z"]:
+                    if get_final_iterate:
+                        trajectory.append(self.get(stage, field))
+                    else:
+                        field_bytes = field.encode('utf-8')
+                        dims = acados_solver_common.ocp_nlp_dims_get_from_attr(
+                            self.nlp_config, self.nlp_dims, self.nlp_out, stage, field_bytes)
+                        out = np.zeros((dims,), dtype=np.float64)
+                        acados_solver_common.ocp_nlp_get_from_iterate(
+                            self.nlp_solver, iteration, stage, field_bytes, <void *> out.data)
+                        trajectory.append(out)
+            data[field] = trajectory
+
+        return AcadosOcpIterate(**data)
+
+
     def __get_stat_int(self, field):
         cdef int out
         acados_solver_common.ocp_nlp_get(self.nlp_solver, field, <void *> &out)
@@ -631,6 +658,8 @@ cdef class AcadosOcpSolverCython:
         cdef cnp.ndarray[cnp.float64_t, ndim=2] out_mat = np.ascontiguousarray(np.zeros((n, m)), dtype=np.float64)
         acados_solver_common.ocp_nlp_get(self.nlp_solver, field, <void *> out_mat.data)
         return out_mat
+
+
 
 
     def get_cost(self):
@@ -925,10 +954,10 @@ cdef class AcadosOcpSolverCython:
         # c_idx_values = np.ascontiguousarray(idx_values_, dtype=np.intc)
         # idx_data = cast(c_idx_values.ctypes.data, POINTER(c_int))
 
-        # getattr(self.shared_lib, f"{self.model_name}_acados_update_params_sparse").argtypes = \
+        # getattr(self.shared_lib, f"{self.name}_acados_update_params_sparse").argtypes = \
         #                 [c_void_p, c_int, POINTER(c_int), POINTER(c_double), c_int]
-        # getattr(self.shared_lib, f"{self.model_name}_acados_update_params_sparse").restype = c_int
-        # getattr(self.shared_lib, f"{self.model_name}_acados_update_params_sparse") \
+        # getattr(self.shared_lib, f"{self.name}_acados_update_params_sparse").restype = c_int
+        # getattr(self.shared_lib, f"{self.name}_acados_update_params_sparse") \
         #                             (self.capsule, stage, idx_data, param_data, n_update)
 
         cdef cnp.ndarray[cnp.float64_t, ndim=1] value = np.ascontiguousarray(param_values_, dtype=np.float64)

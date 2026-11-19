@@ -3,29 +3,7 @@
  *
  * This file is part of acados.
  *
- * The 2-Clause BSD License
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright notice,
- * this list of conditions and the following disclaimer.
- *
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- * this list of conditions and the following disclaimer in the documentation
- * and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.;
+ * Licensed under the 2-Clause BSD License.
  */
 
 // system
@@ -39,7 +17,7 @@
 #include "acados/utils/external_function_generic.h"
 #include "acados_c/external_function_interface.h"
 // example specific
-#include "acados_sim_solver_{{ model.name }}.h"
+#include "acados_sim_solver_{{ name }}.h"
 // mex
 #include "mex.h"
 #include "mex_macros.h"
@@ -71,7 +49,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
     sim_in *in = (sim_in *) ptr[0];
     // capsule
     ptr = (long long *) mxGetData( mxGetField( C_sim, 0, "capsule" ) );
-    {{ model.name }}_sim_solver_capsule *capsule = ({{ model.name }}_sim_solver_capsule *) ptr[0];
+    {{ name }}_sim_solver_capsule *capsule = ({{ name }}_sim_solver_capsule *) ptr[0];
 
     // field
     char *field = mxArrayToString( prhs[1] );
@@ -88,7 +66,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             MEX_DIM_CHECK_VEC(fun_name, field, matlab_size, acados_size);
             sim_in_set(config, dims, in, field, value);
         {% else %}
-            MEX_FIELD_NOT_SUPPORTED_FOR_SOLVER(fun_name, field, "irk_gnsf")
+            MEX_FIELD_NOT_SUPPORTED_FOR_SOLVER(fun_name, field, "GNSF")
         {% endif %}
     }
     else if (!strcmp(field, "x"))
@@ -107,7 +85,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
     {
         acados_size = {{ dims.np }};
         MEX_DIM_CHECK_VEC(fun_name, field, matlab_size, acados_size);
-        {{ model.name }}_acados_sim_update_params(capsule, value, acados_size);
+        {{ name }}_acados_sim_update_params(capsule, value, acados_size);
     }
     else if (!strcmp(field, "xdot"))
     {
@@ -116,7 +94,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             MEX_DIM_CHECK_VEC(fun_name, field, matlab_size, acados_size);
             sim_solver_set(solver, field, value);
         {% else %}
-            MEX_FIELD_ONLY_SUPPORTED_FOR_SOLVER(fun_name, field, "irk");
+            MEX_FIELD_ONLY_SUPPORTED_FOR_SOLVER(fun_name, field, "IRK");
         {% endif %}
     }
     else if (!strcmp(field, "z"))
@@ -126,7 +104,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             MEX_DIM_CHECK_VEC(fun_name, field, matlab_size, acados_size);
             sim_solver_set(solver, field, value);
         {% else %}
-            MEX_FIELD_ONLY_SUPPORTED_FOR_SOLVER(fun_name, field, "irk");
+            MEX_FIELD_ONLY_SUPPORTED_FOR_SOLVER(fun_name, field, "IRK");
         {% endif %}
     }
     else if (!strcmp(field, "phi_guess"))
@@ -136,15 +114,12 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             MEX_DIM_CHECK_VEC(fun_name, field, matlab_size, acados_size);
             sim_solver_set(solver, field, value);
         {% else %}
-            MEX_FIELD_ONLY_SUPPORTED_FOR_SOLVER(fun_name, field, "irk_gnsf");
+            MEX_FIELD_ONLY_SUPPORTED_FOR_SOLVER(fun_name, field, "GNSF");
         {% endif %}
     }
     else if (!strcmp(field, "seed_adj"))
     {
         sim_dims_get(config, dims, "nx", &acados_size);
-        // TODO(oj): in C, the backward seed is of dimension nx+nu, I think it should only be nx.
-        // sim_dims_get(config, dims, "nu", &tmp);
-        // acados_size += tmp;
         MEX_DIM_CHECK_VEC(fun_name, field, matlab_size, acados_size);
         sim_in_set(config, dims, in, field, value);
     }

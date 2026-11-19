@@ -3,29 +3,7 @@
 %
 % This file is part of acados.
 %
-% The 2-Clause BSD License
-%
-% Redistribution and use in source and binary forms, with or without
-% modification, are permitted provided that the following conditions are met:
-%
-% 1. Redistributions of source code must retain the above copyright notice,
-% this list of conditions and the following disclaimer.
-%
-% 2. Redistributions in binary form must reproduce the above copyright notice,
-% this list of conditions and the following disclaimer in the documentation
-% and/or other materials provided with the distribution.
-%
-% THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-% AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-% IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-% ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-% LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-% CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-% SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-% INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-% CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-% ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-% POSSIBILITY OF SUCH DAMAGE.;
+% Licensed under the 2-Clause BSD License.
 
 %
 
@@ -45,19 +23,36 @@ classdef AcadosOcp < handle
         external_function_files_ocp
         external_function_files_model
 
-        code_gen_opts
-        % moved to code_gen_opts, kept for backward compatibility, remove in future
+        code_gen_options
+        % moved to code_gen_options, kept for backward compatibility, remove in future
         code_export_directory
         json_file
     end
+
+
+    properties (Dependent)
+        code_gen_opts % deprecated, remove at some point
+    end
+
+
     methods
+        function value = get.code_gen_opts(obj)
+            warning('code_gen_opts is deprecated; use code_gen_options instead.');
+            value = obj.code_gen_options;
+        end
+
+        function obj = set.code_gen_opts(obj, value)
+            warning('code_gen_opts is deprecated; use code_gen_options instead.');
+            obj.code_gen_options = value;
+        end
+
         function obj = AcadosOcp()
             obj.dims = AcadosOcpDims();
             obj.cost = AcadosOcpCost();
             obj.constraints = AcadosOcpConstraints();
             obj.solver_options = AcadosOcpOptions();
             obj.model = AcadosModel();
-            obj.code_gen_opts = AcadosCodeGenOpts();
+            obj.code_gen_options = AcadosCodeGenOptions();
 
             obj.parameter_values = [];
             obj.p_global_values = [];
@@ -65,10 +60,22 @@ classdef AcadosOcp < handle
 
             obj.problem_class = 'OCP';
             obj.simulink_opts = [];
-            obj.name = 'ocp';
+            obj.name = [];
 
             obj.json_file = '';
             obj.code_export_directory = '';
+        end
+
+        function obj = set.simulink_opts(obj, value)
+            if isempty(value)
+                obj.simulink_opts = [];
+            elseif isa(value, 'AcadosOcpSimulinkOptions')
+                obj.simulink_opts = value;
+            elseif isstruct(value)
+                obj.simulink_opts = AcadosOcpSimulinkOptions.from_struct(value);
+            else
+                error('simulink_opts must be empty, a struct, or an AcadosOcpSimulinkOptions object.');
+            end
         end
 
         function s = to_struct(self)
@@ -77,11 +84,18 @@ classdef AcadosOcp < handle
             else
                 publicProperties = fieldnames(self);
             end
+            % TODO remove once code_gen_opts is removed
+            publicProperties = setdiff(publicProperties, {'code_gen_opts'}, 'stable');
+            %
             s = struct();
             for fi = 1:numel(publicProperties)
                 s.(publicProperties{fi}) = self.(publicProperties{fi});
             end
 
+            % TODO remove once top-level json_file is deprecated fully.
+            if isfield(s, 'json_file')
+                s = rmfield(s, 'json_file');
+            end
             s = orderfields(s);
 
             % prepare struct for json dump
@@ -89,10 +103,13 @@ classdef AcadosOcp < handle
             s.p_global_values = reshape(num2cell(self.p_global_values), [1, self.dims.np_global]);
             s.model = s.model.to_struct();
             s.dims = orderfields(s.dims.to_struct());
-            s.code_gen_opts = orderfields(s.code_gen_opts.to_struct());
+            s.code_gen_options = orderfields(s.code_gen_options.to_struct());
             s.cost = orderfields(s.cost.convert_to_struct_for_json_dump());
             s.constraints = orderfields(s.constraints.convert_to_struct_for_json_dump());
             s.solver_options = orderfields(s.solver_options.convert_to_struct_for_json_dump());
+            if ~isempty(self.simulink_opts)
+                s.simulink_opts = orderfields(self.simulink_opts.to_struct());
+            end
 
             if ~isempty(self.zoro_description)
                 s.zoro_description = orderfields(self.zoro_description.convert_to_struct_for_json_dump());
@@ -108,38 +125,40 @@ classdef AcadosOcp < handle
                 return
             end
             if strcmp(cost.cost_type_0, 'LINEAR_LS')
-                if ~isempty(cost.W_0) && ~isempty(cost.Vx_0) && ~isempty(cost.Vu_0)
-                    verify_weighting_matrix(cost.W_0, 'W_0');
-                    ny = length(cost.W_0);
+                verify_weighting_matrix(cost.W_0, 'W_0');
+                ny = size(cost.W_0, 1);
 
-                    if isempty(cost.yref_0)
-                        if initial_node_relevant
-                            warning(['yref_0 not provided.' 10 'Using zeros(ny_0,1) by default.']);
-                        end
-                        self.cost.yref_0 = zeros(ny,1);
+                if size(cost.Vx_0, 1) ~= ny || size(cost.Vu_0, 1) ~= ny
+                    error('inconsistent dimension ny_0, regarding W_0, Vx_0, Vu_0.');
+                end
+                if ny ~= 0 && size(cost.Vx_0, 2) ~= dims.nx
+                    error('inconsistent dimension: Vx_0 should have nx columns.');
+                end
+                if ny ~= 0 && size(cost.Vu_0, 2) ~= dims.nu
+                    error('inconsistent dimension: Vu_0 should have nu columns.');
+                end
+                if isempty(cost.yref_0)
+                    if initial_node_relevant && ny > 0
+                        warning(['yref_0 not provided.' 10 'Using zeros(ny_0,1) by default.']);
                     end
-                    if ny ~= size(cost.Vx_0, 1) || ny ~= size(cost.Vu_0, 1) || ny ~= size(cost.yref_0, 1)
-                        error('inconsistent dimension ny_0, regarding W_0, Vx_0, Vu_0, yref_0.');
-                    end
-                else
-                    error('setting linear least square cost: need W_0, Vx_0, Vu_0, at least one missing.')
+                    self.cost.yref_0 = zeros(ny,1);
+                end
+                if size(cost.yref_0, 1) ~= ny
+                    error('inconsistent dimension: regarding W_0, yref_0.');
                 end
                 dims.ny_0 = ny;
             elseif strcmp(cost.cost_type_0, 'NONLINEAR_LS')
-                if ~isempty(cost.W_0) && ~isempty(model.cost_y_expr_0)
-                    verify_weighting_matrix(cost.W_0, 'W_0');
-                    ny = length(cost.W_0);
-                    if isempty(cost.yref_0)
-                        if initial_node_relevant
-                            warning(['yref_0 not provided.' 10 'Using zeros(ny_0,1) by default.']);
-                        end
-                        self.cost.yref_0 = zeros(ny,1);
+                ny = size(cost.W_0, 1);
+                verify_weighting_matrix(cost.W_0, 'W_0');
+                if isempty(cost.yref_0)
+                    if initial_node_relevant && ny > 0
+                        warning(['yref_0 not provided.' 10 'Using zeros(ny_0,1) by default.']);
                     end
-                    if ny ~= length(model.cost_y_expr_0) || ny ~= size(cost.yref_0, 1)
-                        error('inconsistent dimension ny_0, regarding W_0, cost_y_expr_0, yref_0.');
-                    end
-                else
-                    error('setting nonlinear least square cost: need W_0, cost_y_expr_0, at least one missing.')
+                    self.cost.yref_0 = zeros(ny,1);
+                end
+                if (isempty(model.cost_y_expr_0) && ny ~= 0) || length(model.cost_y_expr_0) ~= ny ...
+                        || size(cost.yref_0, 1) ~= ny
+                    error('inconsistent dimension ny_0, regarding W_0, cost_y_expr_0, yref_0.');
                 end
                 dims.ny_0 = ny;
             elseif strcmp(cost.cost_type_0, 'CONVEX_OVER_NONLINEAR')
@@ -193,37 +212,40 @@ classdef AcadosOcp < handle
                 return
             end
             if strcmp(cost.cost_type, 'LINEAR_LS')
-                if ~isempty(cost.W) && ~isempty(cost.Vx) && ~isempty(cost.Vu)
-                    verify_weighting_matrix(cost.W, 'W');
-                    ny = length(cost.W);
-                    if isempty(cost.yref)
-                        if path_nodes_relevant
-                            warning(['yref not provided.' 10 'Using zeros(ny,1) by default.']);
-                        end
-                        self.cost.yref = zeros(ny,1);
+                verify_weighting_matrix(cost.W, 'W');
+                ny = size(cost.W, 1);
+
+                if size(cost.Vx, 1) ~= ny || size(cost.Vu, 1) ~= ny
+                    error('inconsistent dimension ny, regarding W, Vx, Vu.');
+                end
+                if ny ~= 0 && size(cost.Vx, 2) ~= dims.nx
+                    error('inconsistent dimension: Vx should have nx columns.');
+                end
+                if ny ~= 0 && size(cost.Vu, 2) ~= dims.nu
+                    error('inconsistent dimension: Vu should have nu columns.');
+                end
+                if isempty(cost.yref)
+                    if path_nodes_relevant && ny > 0
+                        warning(['yref not provided.' 10 'Using zeros(ny,1) by default.']);
                     end
-                    if ny ~= size(cost.Vx, 1) || ny ~= size(cost.Vu, 1) || ny ~= size(cost.yref, 1)
-                        error('inconsistent dimension ny, regarding W, Vx, Vu, yref.');
-                    end
-                else
-                    error('setting linear least square cost: need W, Vx, Vu, at least one missing.')
+                    self.cost.yref = zeros(ny,1);
+                end
+                if size(cost.yref, 1) ~= ny
+                    error('inconsistent dimension: regarding W, yref.');
                 end
                 dims.ny = ny;
             elseif strcmp(cost.cost_type, 'NONLINEAR_LS')
-                if ~isempty(cost.W) && ~isempty(model.cost_y_expr)
-                    verify_weighting_matrix(cost.W, 'W');
-                    ny = length(cost.W);
-                    if isempty(cost.yref)
-                        if path_nodes_relevant
-                            warning(['yref not provided.' 10 'Using zeros(ny,1) by default.']);
-                        end
-                        self.cost.yref = zeros(ny,1);
+                ny = size(cost.W, 1);
+                verify_weighting_matrix(cost.W, 'W');
+                if isempty(cost.yref)
+                    if path_nodes_relevant && ny > 0
+                        warning(['yref not provided.' 10 'Using zeros(ny,1) by default.']);
                     end
-                    if ny ~= length(model.cost_y_expr) || ny ~= size(cost.yref, 1)
-                        error('inconsistent dimension ny, regarding W, cost_y_expr, yref.');
-                    end
-                else
-                    error('setting nonlinear least square cost: need W, cost_y_expr, at least one missing.')
+                    self.cost.yref = zeros(ny,1);
+                end
+                if (isempty(model.cost_y_expr) && ny ~= 0) || length(model.cost_y_expr) ~= ny ...
+                        || size(cost.yref, 1) ~= ny
+                    error('inconsistent dimension ny, regarding W, cost_y_expr, yref.');
                 end
                 dims.ny = ny;
             elseif strcmp(cost.cost_type, 'CONVEX_OVER_NONLINEAR')
@@ -265,42 +287,37 @@ classdef AcadosOcp < handle
             model = self.model;
 
             if strcmp(cost.cost_type_e, 'LINEAR_LS')
-                if ~isempty(cost.W_e) && ~isempty(cost.Vx_e)
-                    verify_weighting_matrix(cost.W_e, 'W_e');
-                    ny_e = length(cost.W_e);
-                    if isempty(cost.yref_e)
-                        if terminal_node_relevant
-                            warning(['yref_e not provided.' 10 'Using zeros(ny_e,1) by default.']);
-                        end
-                        self.cost.yref_e = zeros(ny_e,1);
+                verify_weighting_matrix(cost.W_e, 'W_e');
+                ny_e = size(cost.W_e, 1);
+
+                if size(cost.Vx_e, 1) ~= ny_e
+                    error('inconsistent dimension ny_e, regarding W_e, Vx_e.');
+                end
+                if ny_e ~= 0 && size(cost.Vx_e, 2) ~= dims.nx
+                    error('inconsistent dimension: Vx_e should have nx columns.');
+                end
+                if isempty(cost.yref_e)
+                    if terminal_node_relevant && ny_e > 0
+                        warning(['yref_e not provided.' 10 'Using zeros(ny_e,1) by default.']);
                     end
-                    if ny_e ~= size(cost.Vx_e, 1) || ny_e ~= size(cost.yref_e, 1)
-                        error('inconsistent dimension ny_e, regarding W_e, Vx_e, yref_e');
-                    end
-                elseif ~~isempty(cost.W_e) && ~~isempty(cost.Vx_e)
-                    ny_e = 0;
-                    if terminal_node_relevant
-                        warning('Fields W_e and Vx_e not provided. Using empty ls terminal cost.')
-                    end
-                else
-                    error('setting linear least square cost: need W_e, Vx_e, at least one missing.')
+                    self.cost.yref_e = zeros(ny_e,1);
+                end
+                if size(cost.yref_e, 1) ~= ny_e
+                    error('inconsistent dimension: regarding W_e, yref_e.');
                 end
                 dims.ny_e = ny_e;
             elseif strcmp(cost.cost_type_e, 'NONLINEAR_LS')
-                if ~isempty(cost.W_e) && ~isempty(model.cost_y_expr_e)
-                    verify_weighting_matrix(cost.W_e, 'W_e');
-                    ny_e = length(cost.W_e);
-                    if isempty(cost.yref_e)
-                        if terminal_node_relevant
-                            warning(['yref_e not provided.' 10 'Using zeros(ny_e,1) by default.']);
-                        end
-                        self.cost.yref_e = zeros(ny_e,1);
+                ny_e = size(cost.W_e, 1);
+                verify_weighting_matrix(cost.W_e, 'W_e');
+                if isempty(cost.yref_e)
+                    if terminal_node_relevant && ny_e > 0
+                        warning(['yref_e not provided.' 10 'Using zeros(ny_e,1) by default.']);
                     end
-                    if ny_e ~= length(model.cost_y_expr_e) || ny_e ~= size(cost.yref_e, 1)
-                        error('inconsistent dimension ny_e, regarding W_e, cost_y_expr_e, yref_e.');
-                    end
-                else
-                    error('setting nonlinear least square cost: need W_e, cost_y_expr_e, at least one missing.')
+                    self.cost.yref_e = zeros(ny_e,1);
+                end
+                if (isempty(model.cost_y_expr_e) && ny_e ~= 0) || length(model.cost_y_expr_e) ~= ny_e ...
+                        || size(cost.yref_e, 1) ~= ny_e
+                    error('inconsistent dimension ny_e, regarding W_e, cost_y_expr_e, yref_e.');
                 end
                 dims.ny_e = ny_e;
             elseif strcmp(cost.cost_type_e, 'CONVEX_OVER_NONLINEAR')
@@ -992,20 +1009,20 @@ classdef AcadosOcp < handle
             % set integrator time automatically
             opts.Tsim = opts.time_steps(1);
 
-            if opts.sens_forw_p && ~any(strcmp(opts.integrator_type, {'ERK', 'IRK'}))
+            if self.code_gen_options.sens_forw_p && ~any(strcmp(opts.integrator_type, {'ERK', 'IRK'}))
                 error('Option sens_forw_p=true is currently only supported for integrator_type = ERK and IRK.');
             end
 
             % integrator: num_stages
             if ~isempty(opts.sim_method_num_stages)
-                if(strcmp(opts.integrator_type, "ERK"))
+                if (strcmp(opts.integrator_type, "ERK"))
                     if (any(opts.sim_method_num_stages < 1) || any(opts.sim_method_num_stages > 4))
                         error(['ERK: num_stages = ', num2str(opts.sim_method_num_stages) ' not available. Only number of stages = {1,2,3,4} implemented!']);
                     end
                 end
             end
 
-            %% options sanity checks
+            % options sanity checks
             if length(opts.sim_method_num_steps) == 1
                 opts.sim_method_num_steps = opts.sim_method_num_steps * ones(1, opts.N_horizon);
             elseif length(opts.sim_method_num_steps) ~= opts.N_horizon
@@ -1022,6 +1039,19 @@ classdef AcadosOcp < handle
                 error('sim_method_jac_reuse must be a scalar or a vector of length N');
             end
 
+            % check dynamics expression for the specified integrator type
+            switch opts.integrator_type
+                case 'ERK'
+                    assert(~isempty(self.model.f_expl_expr), 'For the ERK integrator, AcadosModel.f_expl_expr should be provided.')
+                case 'ERK_WITH_COST'
+                    assert(~isempty(self.model.f_expl_expr_with_cost), ['For the ', opts.integrator_type, ' integrator, AcadosModel.f_expl_expr_with_cost should be provided.'])
+                case {'IRK', 'LIFTED_IRK', 'GNSF'}
+                    assert(~isempty(self.model.f_impl_expr), ['For the ', opts.integrator_type, ' integrator, AcadosModel.f_impl_expr should be provided.'])
+                case 'DISCRETE'
+                    assert(~isempty(self.model.disc_dyn_expr), 'For the DISCRETE integrator, AcadosModel.disc_dyn_expr should be provided.')
+                otherwise
+                    error('Integrator type not recognized.')
+            end
 
         end
 
@@ -1031,33 +1061,6 @@ classdef AcadosOcp < handle
                 mocp_info = [];
             end
             self.model.make_consistent(self.dims);
-            % OCP name
-            self.name = self.model.name;
-
-            % code generation options
-            % migrate deprecated top-level fields into code_gen_opts (backward compatibility)
-            deprecated_fields = {'json_file', 'code_export_directory'};
-
-            for i = 1:length(deprecated_fields)
-                fld = deprecated_fields{i};
-
-                old_val = self.(fld);
-                new_val = self.code_gen_opts.(fld);
-
-                if ~isempty(old_val)
-                    warning(['AcadosOcp.', fld, ' is deprecated, please use AcadosOcp.code_gen_opts.', fld, '.']);
-                    if ~isempty(new_val)
-                        warning(['Both AcadosOcp.', fld, ' and AcadosOcp.code_gen_opts.', fld, ' are set, using AcadosOcp.code_gen_opts.', fld, '.']);
-                    else
-                        self.code_gen_opts.(fld) = old_val;
-                    end
-                end
-            end
-            if isempty(self.code_gen_opts.json_file)
-                self.code_gen_opts.json_file = [self.name, '_ocp.json'];
-            end
-
-            self.code_gen_opts.make_consistent();
 
             % problem formulation
             model = self.model;
@@ -1090,7 +1093,7 @@ classdef AcadosOcp < handle
 
             % detect GNSF structure
             if strcmp(opts.integrator_type, 'GNSF') && opts.N_horizon > 0
-                if dims.gnsf_nx1 + dims.gnsf_nx2 ~= dims.nx
+                if model.gnsf_model.dims.nx1 + model.gnsf_model.dims.nx2 ~= dims.nx
                     % TODO: properly interface those.
                     gnsf_transcription_opts = struct();
                     detect_gnsf_structure(model, dims, gnsf_transcription_opts);
@@ -1113,7 +1116,7 @@ classdef AcadosOcp < handle
             if ~ismember(opts.hpipm_mode, hpipm_modes)
                 error(['Invalid hpipm_mode: ', opts.hpipm_mode, '. Available options are: ', strjoin(hpipm_modes, ', ')]);
             end
-            INTEGRATOR_TYPES = {'ERK', 'IRK', 'GNSF', 'DISCRETE', 'LIFTED_IRK'};
+            INTEGRATOR_TYPES = {'ERK', 'ERK_WITH_COST', 'IRK', 'GNSF', 'DISCRETE', 'LIFTED_IRK'};
             if ~ismember(opts.integrator_type, INTEGRATOR_TYPES)
                 error(['Invalid integrator_type: ', opts.integrator_type, '. Available options are: ', strjoin(INTEGRATOR_TYPES, ', ')]);
             end
@@ -1225,22 +1228,37 @@ classdef AcadosOcp < handle
                 end
             end
 
-
             self.make_consistent_cost_initial(initial_node_relevant);
             self.make_consistent_cost_path(path_nodes_relevant);
             self.make_consistent_cost_terminal(terminal_node_relevant);
 
+            % GN check
+            gn_warning_0 = (opts.N_horizon > 0 && strcmp(cost.cost_type_0, 'EXTERNAL') && strcmp(opts.hessian_approx, 'GAUSS_NEWTON') && opts.ext_cost_num_hess == 0 && isempty(model.cost_expr_ext_cost_custom_hess_0));
+            gn_warning_path = (opts.N_horizon > 0 && strcmp(cost.cost_type, 'EXTERNAL') && strcmp(opts.hessian_approx, 'GAUSS_NEWTON') && opts.ext_cost_num_hess == 0 && isempty(model.cost_expr_ext_cost_custom_hess));
+            gn_warning_terminal = (strcmp(cost.cost_type_e, 'EXTERNAL') && strcmp(opts.hessian_approx, 'GAUSS_NEWTON') && opts.ext_cost_num_hess == 0 && isempty(model.cost_expr_ext_cost_custom_hess_e));
+            if any([gn_warning_0, gn_warning_path, gn_warning_terminal])
+                external_cost_types = {};
+                if gn_warning_0
+                    external_cost_types{end+1} = 'cost_type_0';
+                end
+                if gn_warning_path
+                    external_cost_types{end+1} = 'cost_type';
+                end
+                if gn_warning_terminal
+                    external_cost_types{end+1} = 'cost_type_e';
+                end
+                fprintf(['\nWARNING: Gauss-Newton Hessian approximation with EXTERNAL cost type not well defined!\n' ...
+                    'got cost_type EXTERNAL for %s, hessian_approx: ''GAUSS_NEWTON''.\n' ...
+                    'With this setting, acados will proceed computing the exact Hessian for the cost term and no Hessian contribution from constraints and dynamics.\n' ...
+                    'If the external cost is a linear least squares cost, this coincides with the Gauss-Newton Hessian.\n' ...
+                    'Note: There is also the option to use the external cost module with a numerical Hessian approximation (see `ext_cost_num_hess`).\n' ...
+                    'OR the option to provide a symbolic custom Hessian approximation (see `cost_expr_ext_cost_custom_hess`).\n\n'], ...
+                    strjoin(external_cost_types, ', '));
+            end
+
             % cost integration
             if strcmp(opts.cost_discretization, "INTEGRATOR") && opts.N_horizon > 0
-                if ~(strcmp(cost.cost_type, "NONLINEAR_LS") || strcmp(cost.cost_type, "CONVEX_OVER_NONLINEAR"))
-                    error('INTEGRATOR cost discretization requires CONVEX_OVER_NONLINEAR or NONLINEAR_LS cost type for path cost.')
-                end
-                if ~(strcmp(cost.cost_type_0, "NONLINEAR_LS") || strcmp(cost.cost_type_0, "CONVEX_OVER_NONLINEAR"))
-                    error('INTEGRATOR cost discretization requires CONVEX_OVER_NONLINEAR or NONLINEAR_LS cost type for initial cost.')
-                end
-                if strcmp(opts.nlp_solver_type, 'SQP_WITH_FEASIBLE_QP')
-                    error('cost_discretization == INTEGRATOR is not compatible with SQP_WITH_FEASIBLE_QP yet.')
-                end
+                self.make_consistent_cost_integration();
             end
 
 
@@ -1300,7 +1318,7 @@ classdef AcadosOcp < handle
             end
 
             % check for ACADOS_INFTY
-            if ~ismember(opts.qp_solver, {'PARTIAL_CONDENSING_HPIPM', 'FULL_CONDENSING_HPIPM', 'FULL_CONDENSING_DAQP'})
+            if ~ismember(opts.qp_solver, {'PARTIAL_CONDENSING_HPIPM', 'FULL_CONDENSING_HPIPM', 'FULL_CONDENSING_DAQP', 'PARTIAL_CONDENSING_OSQP', 'PARTIAL_CONDENSING_CLARABEL', 'FULL_CONDENSING_QPOASES'})
                 ACADOS_INFTY = get_acados_infty();
                 % loop over all bound vectors
                 if opts.N_horizon > 0
@@ -1338,7 +1356,10 @@ classdef AcadosOcp < handle
 
             if ~(strcmp(opts.qp_solver, "FULL_CONDENSING_HPIPM") || ...
                 strcmp(opts.qp_solver, "PARTIAL_CONDENSING_HPIPM") || ...
-                strcmp(opts.qp_solver, "FULL_CONDENSING_DAQP"))
+                strcmp(opts.qp_solver, "FULL_CONDENSING_DAQP") || ...
+                strcmp(opts.qp_solver, "PARTIAL_CONDENSING_OSQP") || ...
+                strcmp(opts.qp_solver, "PARTIAL_CONDENSING_CLARABEL") || ...
+                strcmp(opts.qp_solver, "FULL_CONDENSING_QPOASES"))
                 disp(['NOTE: The selected QP solver ', opts.qp_solver, ' does not support one-sided constraints yet.']);
             end
 
@@ -1527,7 +1548,7 @@ classdef AcadosOcp < handle
                 if opts.N_horizon == 0
                     error('ZORO only supported for N_horizon > 0.');
                 end
-                self.zoro_description.make_consistent(self.dims, opts);
+                self.zoro_description.make_consistent(self.dims, self.code_gen_options);
             end
 
             % Anderson acceleration
@@ -1553,6 +1574,139 @@ classdef AcadosOcp < handle
                 if ~isempty(val) && (depends_on(val, model.u) || depends_on(val, model.z))
                     error([field ' can not depend on u or z.'])
                 end
+            end
+            % Simulink
+            if ~isempty(self.simulink_opts)
+                self.simulink_opts.make_consistent(self.solver_options, 'OCP');
+            end
+
+            % code generation options
+            % migrate deprecated top-level fields into code_gen_options (backward compatibility)
+            deprecated_fields = {'json_file', 'code_export_directory'};
+
+            for i = 1:length(deprecated_fields)
+                fld = deprecated_fields{i};
+
+                old_val = self.(fld);
+                new_val = self.code_gen_options.(fld);
+
+                if ~isempty(old_val)
+                    warning(['AcadosOcp.', fld, ' is deprecated, please use AcadosOcp.code_gen_options.', fld, '.']);
+                    if ~isempty(new_val)
+                        warning(['Both AcadosOcp.', fld, ' and AcadosOcp.code_gen_options.', fld, ' are set, using AcadosOcp.code_gen_options.', fld, '.']);
+                    else
+                        self.code_gen_options.(fld) = old_val;
+                    end
+                end
+            end
+
+            if isempty(self.name)
+                self.name = strcat('ocp_', self.model.name, '_', self.get_id());
+            end
+
+            if length(self.name) - 25 > namelengthmax
+                error('The OCP name %s exceeds the maximum namelength. Choose a shorter name.', self.name)
+            end
+
+            code_gen_options_defaults = AcadosCodeGenOptions();
+            deprecated_fields_solver_opts = {...
+                'ext_fun_compile_flags', ...
+                'ext_fun_expand_dyn', ...
+                'ext_fun_expand_cost', ...
+                'ext_fun_expand_constr', ...
+                'ext_fun_expand_precompute', ...
+                'model_external_shared_lib_dir', ...
+                'model_external_shared_lib_name', ...
+                'with_value_sens_wrt_params', ...
+                'sens_forw_p'};
+
+            for i = 1:length(deprecated_fields_solver_opts)
+                fld = deprecated_fields_solver_opts{i};
+
+                old_val = self.solver_options.(fld);
+                new_val = self.code_gen_options.(fld);
+                default_val = code_gen_options_defaults.(fld);
+
+                if ~(isempty(old_val) && isempty(default_val))
+                    non_default_old_val = ~isequal(old_val, default_val);
+                    non_default_new_val = ~isequal(new_val, default_val);
+                    if non_default_old_val && non_default_new_val
+                        warning(['Both AcadosOcpOptions.', fld, ' and AcadosOcp.code_gen_options.', fld, ' are set, using AcadosOcp.code_gen_options.', fld, '.']);
+                    elseif non_default_old_val
+                        self.code_gen_options.(fld) = old_val;
+                    end
+                end
+            end
+            self.code_gen_options.generate_hess = strcmp(self.solver_options.hessian_approx, 'EXACT');
+            self.code_gen_options.make_consistent(self.name);
+        end
+
+        function reformulate_with_erk_with_cost(self)
+            model = self.model;
+            cost = self.cost;
+
+            if ~isequal(model.cost_expr_ext_cost, model.cost_expr_ext_cost_0)
+                error(['Cost integration with ERK_WITH_COST requires the initial cost to coincide with the path cost: ', ...
+                    'model.cost_expr_ext_cost_0 must equal model.cost_expr_ext_cost.']);
+            end
+
+            % reformulate with cost_dynamics
+            model.f_expl_expr_with_cost = [model.f_expl_expr; model.cost_expr_ext_cost];
+            % remove EXTERNAL cost formulation and reformulate with LLS
+            model.cost_expr_ext_cost = [];
+            model.cost_expr_ext_cost_0 = [];
+            cost.cost_type = 'LINEAR_LS';
+            cost.Vu = zeros(0, 0);
+            cost.Vx = zeros(0, 0);
+            cost.W = zeros(0, 0);
+            cost.yref = zeros(0, 1);
+
+            cost.cost_type_0 = 'LINEAR_LS';
+            cost.Vu_0 = zeros(0, 0);
+            cost.Vx_0 = zeros(0, 0);
+            cost.W_0 = zeros(0, 0);
+            cost.yref_0 = zeros(0, 1);
+        end
+
+        function make_consistent_cost_integration(self)
+            opts = self.solver_options;
+            cost = self.cost;
+
+            if strcmp(opts.integrator_type, 'IRK')
+                if ~(strcmp(cost.cost_type, 'NONLINEAR_LS') || strcmp(cost.cost_type, 'CONVEX_OVER_NONLINEAR'))
+                    error(['cost_discretization == INTEGRATOR with IRK only works with cost in ', ...
+                        '["NONLINEAR_LS", "CONVEX_OVER_NONLINEAR"] costs, got cost_type ', cost.cost_type, '.']);
+                end
+                if ~(strcmp(cost.cost_type_0, 'NONLINEAR_LS') || strcmp(cost.cost_type_0, 'CONVEX_OVER_NONLINEAR'))
+                    error(['cost_discretization == INTEGRATOR with IRK only works with cost in ', ...
+                        '["NONLINEAR_LS", "CONVEX_OVER_NONLINEAR"] costs, got cost_type_0 ', cost.cost_type_0, '.']);
+                end
+            elseif strcmp(opts.integrator_type, 'ERK')
+                if ~strcmp(cost.cost_type, 'EXTERNAL') || ~strcmp(cost.cost_type_0, 'EXTERNAL')
+                    error(['cost_discretization INTEGRATOR with ERK only works with EXTERNAL cost, got cost_type_0 ', ...
+                        cost.cost_type_0, ', cost_type ', cost.cost_type, '.']);
+                end
+                fprintf('Cost integration for ERK with EXTERNAL cost is implemented via integrator_type `ERK_WITH_COST`, reformulating automatically.\n');
+                self.solver_options.integrator_type = 'ERK_WITH_COST';
+                self.reformulate_with_erk_with_cost();
+            elseif strcmp(opts.integrator_type, 'ERK_WITH_COST')
+                % already formulated, as done in reformulate_with_erk_with_cost
+                if ~strcmp(cost.cost_type_0, 'LINEAR_LS') || ~strcmp(cost.cost_type, 'LINEAR_LS')
+                    error(['integrator_type ERK_WITH_COST requires cost_type_0 and cost_type to be LINEAR_LS with ny = 0, ', ...
+                        'got cost_type_0 ', cost.cost_type_0, ', cost_type ', cost.cost_type, '.']);
+                end
+                if ~isempty(cost.yref_0) || ~isempty(cost.yref)
+                    error('integrator_type ERK_WITH_COST requires cost_type_0 and cost_type to be LINEAR_LS with ny = 0, got non-empty yref or yref_0.');
+                end
+                if ~strcmp(opts.hessian_approx, 'EXACT')
+                    error('integrator_type ERK_WITH_COST only works with hessian_approx == ''EXACT''');
+                end
+            else
+                error(['integrator_type ', opts.integrator_type, ' does not support cost_discretization == INTEGRATOR.']);
+            end
+
+            if strcmp(opts.nlp_solver_type, 'SQP_WITH_FEASIBLE_QP')
+                error('cost_discretization == INTEGRATOR is not compatible with SQP_WITH_FEASIBLE_QP yet.');
             end
         end
 
@@ -1608,28 +1762,40 @@ classdef AcadosOcp < handle
             end
         end
 
+        function id = get_id(self)
+            % Returns a hash of the OCP object to be used as a unique identifier.
+
+            fields_used_for_hash = { ...
+                'dims', ...
+                'cost', ...
+                'constraints', ...
+                'model', ...
+                'solver_options', ...
+                'zoro_description', ...
+                'simulink_opts' ...
+            };
+
+            hashes = struct();
+
+            for i = 1:numel(fields_used_for_hash)
+                field = fields_used_for_hash{i};
+                val = self.(field);
+                if ~ isempty(val)
+                    hashes.(field) = hash_struct(val.to_struct());
+                end
+            end
+
+            hash = hash_struct(hashes);
+
+            id = hash(1:8);
+        end
+
         function context = generate_external_functions(ocp, context)
 
             %% generate C code for CasADi functions / copy external functions
-            solver_opts = ocp.solver_options;
-
             if nargin < 2
                 % options for CasADi code generation
-                casadi_code_gen_opts = struct();
-                casadi_code_gen_opts.generate_hess = strcmp(solver_opts.hessian_approx, 'EXACT');
-                casadi_code_gen_opts.sens_forw_p = solver_opts.sens_forw_p;
-                casadi_code_gen_opts.with_solution_sens_wrt_params = solver_opts.with_solution_sens_wrt_params;
-                casadi_code_gen_opts.with_value_sens_wrt_params = solver_opts.with_value_sens_wrt_params;
-
-                casadi_code_gen_opts.code_export_directory = ocp.code_gen_opts.code_export_directory;
-                casadi_code_gen_opts.ext_fun_expand_dyn = solver_opts.ext_fun_expand_dyn;
-                casadi_code_gen_opts.ext_fun_expand_cost = solver_opts.ext_fun_expand_cost;
-                casadi_code_gen_opts.ext_fun_expand_constr = solver_opts.ext_fun_expand_constr;
-                casadi_code_gen_opts.ext_fun_expand_precompute = solver_opts.ext_fun_expand_precompute;
-
-                context = GenerateContext(ocp.model.p_global, ocp.name, casadi_code_gen_opts);
-            else
-                casadi_code_gen_opts = context.opts;
+                context = GenerateContext(ocp.model.p_global, ocp.name, ocp.code_gen_options);
             end
             context = setup_code_generation_context(ocp, context, false, false);
             context.finalize();
@@ -1639,15 +1805,14 @@ classdef AcadosOcp < handle
         end
 
         function context = setup_code_generation_context(ocp, context, ignore_initial, ignore_terminal)
-            casadi_code_gen_opts = context.opts;
-            solver_opts = ocp.solver_options;
+            code_gen_options = context.opts;
             constraints = ocp.constraints;
             cost = ocp.cost;
             dims = ocp.dims;
 
             setup_code_generation_context_dynamics(ocp, context);
 
-            if solver_opts.N_horizon == 0
+            if ocp.solver_options.N_horizon == 0
                 stage_type_indices = [3];
             else
                 if ignore_initial && ignore_terminal
@@ -1666,7 +1831,7 @@ classdef AcadosOcp < handle
             % cost
             cost_types = {cost.cost_type_0, cost.cost_type, cost.cost_type_e};
             cost_ext_fun_types = {cost.cost_ext_fun_type_0, cost.cost_ext_fun_type, cost.cost_ext_fun_type_e};
-            cost_dir = fullfile(casadi_code_gen_opts.code_export_directory, [ocp.name '_cost']);
+            cost_dir = fullfile(code_gen_options.code_export_directory, [ocp.model.name '_cost']);
 
             for n = 1:length(stage_type_indices)
 
@@ -1700,7 +1865,7 @@ classdef AcadosOcp < handle
             % constraints
             constraints_types = {constraints.constr_type_0, constraints.constr_type, constraints.constr_type_e};
             constraints_dims = {dims.nh_0, dims.nh, dims.nh_e};
-            constraints_dir = fullfile(casadi_code_gen_opts.code_export_directory, [ocp.name '_constraints']);
+            constraints_dir = fullfile(code_gen_options.code_export_directory, [ocp.model.name '_constraints']);
 
             for n = 1:length(stage_type_indices)
                 i = stage_type_indices(n);
@@ -1711,13 +1876,13 @@ classdef AcadosOcp < handle
         end
 
         function setup_code_generation_context_dynamics(ocp, context)
-            code_gen_opts = context.opts;
+            code_gen_options = context.opts;
             solver_opts = ocp.solver_options;
             if solver_opts.N_horizon == 0
                 return
             end
 
-            model_dir = fullfile(code_gen_opts.code_export_directory, [ocp.name '_model']);
+            model_dir = fullfile(code_gen_options.code_export_directory, [ocp.model.name '_model']);
 
             if strcmp(ocp.model.dyn_ext_fun_type, 'generic')
                 check_dir_and_create(model_dir);
@@ -1728,6 +1893,8 @@ classdef AcadosOcp < handle
                 switch solver_opts.integrator_type
                     case 'ERK'
                         generate_c_code_explicit_ode(context, ocp.model, model_dir);
+                    case 'ERK_WITH_COST'
+                        generate_c_code_explicit_ode_with_cost_state(context, ocp.model, model_dir);
                     case 'IRK'
                         generate_c_code_implicit_ode(context, ocp.model, model_dir);
                     case 'LIFTED_IRK'
@@ -1750,9 +1917,9 @@ classdef AcadosOcp < handle
         function render_templates(self)
 
             %% render templates
-            json_fullfile = self.code_gen_opts.json_file;
+            json_fullfile = self.code_gen_options.json_file;
             main_dir = pwd;
-            chdir(self.code_gen_opts.code_export_directory);
+            chdir(self.code_gen_options.code_export_directory);
 
             template_list = self.get_template_list();
             for i = 1:length(template_list)
@@ -1806,7 +1973,7 @@ classdef AcadosOcp < handle
             template_list{end+1} = {'Makefile.in', ['Makefile']};
 
             % integrator
-            if ~strcmp(self.solver_options.integrator_type, 'DISCRETE')
+            if ~strcmp(self.solver_options.integrator_type, 'DISCRETE') && ~strcmp(self.solver_options.integrator_type, 'ERK_WITH_COST')
                 template_list{end+1} = {'acados_sim_solver.in.c', ['acados_sim_solver_', self.name, '.c']};
                 template_list{end+1} = {'acados_sim_solver.in.h', ['acados_sim_solver_', self.name, '.h']};
                 template_list{end+1} = {'main_sim.in.c', ['main_sim_', self.name, '.c']};
@@ -1831,7 +1998,7 @@ classdef AcadosOcp < handle
             template_list = [template_list, self.get_external_function_header_templates()];
 
             if self.dims.n_global_data > 0
-                template_list{end+1} = {'p_global_precompute_fun.in.h',  [self.model.name, '_p_global_precompute_fun.h']};
+                template_list{end+1} = {'p_global_precompute_fun.in.h',  [self.name, '_p_global_precompute_fun.h']};
             end
 
             % Simulink
@@ -1841,12 +2008,6 @@ classdef AcadosOcp < handle
                 if ~strcmp(self.solver_options.integrator_type, 'DISCRETE')
                     template_list{end+1} = {fullfile(matlab_template_path, 'acados_sim_solver_sfun.in.c'), ['acados_sim_solver_sfunction_', self.name, '.c']};
                     template_list{end+1} = {fullfile(matlab_template_path, 'make_sfun_sim.in.m'), ['make_sfun_sim.m']};
-                end
-                if self.simulink_opts.inputs.rti_phase && ~strcmp(self.solver_options.nlp_solver_type, 'SQP_RTI')
-                    error('rti_phase is only supported for SQP_RTI');
-                end
-                if self.simulink_opts.outputs.KKT_residuals && strcmp(self.solver_options.nlp_solver_type, 'SQP_RTI')
-                    warning('KKT_residuals now computes the residuals of the output iterate in SQP_RTI, this leads to increased computation time, turn off this port if it is not needed. See https://github.com/acados/acados/pull/1346.');
                 end
             else
                 disp("Not rendering Simulink-related templates, as simulink_opts are not specified.")
@@ -1862,7 +2023,7 @@ classdef AcadosOcp < handle
 
         function dump_to_json(self, json_file)
             if nargin < 2
-                json_file = self.code_gen_opts.json_file;
+                json_file = self.code_gen_options.json_file;
             end
 
             out_struct = self.to_struct();
@@ -1891,8 +2052,17 @@ classdef AcadosOcp < handle
             fields = fieldnames(s);
             for fi = 1:numel(fields)
                 f = fields{fi};
-                % Handle nested acados objects by trying to call their own from_struct
-                if ismember(f, {'constraints', 'cost', 'solver_options', 'model', 'dims', 'code_gen_opts'})
+                if ismember(f, {'simulink_opts', 'zoro_description'})
+                    % fields that can be empty or of a specific class.
+                    if isempty(s.(f))
+                        obj.(f) = [];
+                    elseif ismember(f, {'simulink_opts'})
+                        obj.(f) = AcadosOcpSimulinkOptions.from_struct(s.(f));
+                    elseif ismember(f, {'zoro_description'})
+                        obj.(f) = ZoroDescription.from_struct(s.(f));
+                    end
+                elseif ismember(f, {'constraints', 'cost', 'solver_options', 'model', 'dims', 'code_gen_options', 'code_gen_opts'})
+                    % Handle nested acados objects by trying to call their own from_struct
                     field_struct = s.(f);
                     if isempty(field_struct)
                         error('Failed to load OCP from struct. Field %s is not provided.', f);
@@ -1905,6 +2075,10 @@ classdef AcadosOcp < handle
                     % disp(target_class)
                     fh = str2func([target_class '.from_struct']);
                     obj.(f) = fh(field_struct);
+                elseif ismember(f, {'ros_opts'})
+                    if ~isempty(s.(f))
+                        warning('Cannot load ros_opts in MATLAB, only supported in Python.')
+                    end
                 elseif strcmp(f, 'hash')
                     % skip hash field
                     if ischar(s.hash)
@@ -1914,6 +2088,9 @@ classdef AcadosOcp < handle
                     end
                     % disp(['Skipping hash field in AcadosOcp.from_struct, got ', hash_str]);
                     continue
+                elseif strcmp(f, 'p_global_values')
+                    % column vector
+                    obj.(f) = s.(f)(:);
                 else
                     % direct assignment for simple fields
                     try

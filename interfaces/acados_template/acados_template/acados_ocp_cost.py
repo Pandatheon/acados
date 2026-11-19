@@ -3,30 +3,7 @@
 #
 # This file is part of acados.
 #
-# The 2-Clause BSD License
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#
-# 1. Redistributions of source code must retain the above copyright notice,
-# this list of conditions and the following disclaimer.
-#
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-# this list of conditions and the following disclaimer in the documentation
-# and/or other materials provided with the distribution.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-# POSSIBILITY OF SUCH DAMAGE.;
-#
+# Licensed under the 2-Clause BSD License.
 
 import numpy as np
 import warnings, inspect
@@ -82,16 +59,16 @@ class AcadosOcpCost:
         self.__cost_function_ext_cost_0 = None # TODO add property, only required for generic
 
         # Lagrange term
-        self.__cost_type   = 'LINEAR_LS'  # cost type
-        self.__W           = np.zeros((0,0))
-        self.__Vx          = np.zeros((0,0))
-        self.__Vu          = np.zeros((0,0))
-        self.__Vz          = np.zeros((0,0))
-        self.__yref        = np.array([])
-        self.__Zl          = np.array([])
-        self.__Zu          = np.array([])
-        self.__zl          = np.array([])
-        self.__zu          = np.array([])
+        self.__cost_type = 'LINEAR_LS'  # cost type
+        self.__W = np.zeros((0,0))
+        self.__Vx = np.zeros((0,0))
+        self.__Vu = np.zeros((0,0))
+        self.__Vz = np.zeros((0,0))
+        self.__yref = np.array([])
+        self.__Zl = np.array([])
+        self.__Zu = np.array([])
+        self.__zl = np.array([])
+        self.__zu = np.array([])
 
         # TODO: check how generic works in templates ?!
         self.__cost_ext_fun_type = 'casadi'
@@ -100,13 +77,13 @@ class AcadosOcpCost:
 
         # Mayer term
         self.__cost_type_e = 'LINEAR_LS'
-        self.__W_e         = np.zeros((0,0))
-        self.__Vx_e        = np.zeros((0,0))
-        self.__yref_e      = np.array([])
-        self.__Zl_e        = np.array([])
-        self.__Zu_e        = np.array([])
-        self.__zl_e        = np.array([])
-        self.__zu_e        = np.array([])
+        self.__W_e = np.zeros((0,0))
+        self.__Vx_e = np.zeros((0,0))
+        self.__yref_e = np.array([])
+        self.__Zl_e = np.array([])
+        self.__Zu_e = np.array([])
+        self.__zl_e = np.array([])
+        self.__zu_e = np.array([])
         self.__cost_ext_fun_type_e = 'casadi'
         self.__cost_source_ext_cost_e = None # TODO add property, only required for generic
         self.__cost_function_ext_cost_e = None # TODO add property, only required for generic

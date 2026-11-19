@@ -3,30 +3,7 @@
 #
 # This file is part of acados.
 #
-# The 2-Clause BSD License
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#
-# 1. Redistributions of source code must retain the above copyright notice,
-# this list of conditions and the following disclaimer.
-#
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-# this list of conditions and the following disclaimer in the documentation
-# and/or other materials provided with the distribution.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-# POSSIBILITY OF SUCH DAMAGE.;
-#
+# Licensed under the 2-Clause BSD License.
 # cython: language_level=3
 # cython: profile=False
 # distutils: language=c
@@ -61,7 +38,7 @@ cdef class AcadosSimSolverCython:
 
     cdef bint solver_created
 
-    cdef str model_name
+    cdef str name
 
     cdef str sim_solver_type
 
@@ -69,11 +46,12 @@ cdef class AcadosSimSolverCython:
     cdef list gettable_matrices
     cdef list gettable_scalars
 
-    def __cinit__(self, model_name):
+    def __cinit__(self, name, integrator_type):
 
         self.solver_created = False
 
-        self.model_name = model_name
+        self.name = name
+        self.sim_solver_type = integrator_type
 
         # create capsule
         self.capsule = acados_sim_solver.acados_sim_solver_create_capsule()
@@ -85,9 +63,9 @@ cdef class AcadosSimSolverCython:
         # get pointers solver
         self.__get_pointers_solver()
 
-        self.gettable_vectors = ['x', 'u', 'z', 'S_adj']
+        self.gettable_vectors = ['x', 'z', 'S_adj']
         self.gettable_matrices = ['S_forw', 'Sx', 'Su', 'S_hess', 'S_algebraic', 'S_p']
-        self.gettable_scalars = ['CPUtime', 'time_tot', 'ADtime', 'time_ad', 'LAtime', 'time_la']
+        self.gettable_scalars = ['T', 'CPUtime', 'time_tot', 'ADtime', 'time_ad', 'LAtime', 'time_la']
 
     def __get_pointers_solver(self):
         """
@@ -122,7 +100,7 @@ cdef class AcadosSimSolverCython:
         if status == 2:
             print("Warning: acados_sim_solver reached maximum iterations.")
         elif status != 0:
-            raise RuntimeError(f'acados_sim_solver for model {self.model_name} returned status {status}.')
+            raise RuntimeError(f'acados_sim_solver for model {self.name} returned status {status}.')
 
         x_next = self.get('x')
         return x_next
@@ -156,7 +134,10 @@ cdef class AcadosSimSolverCython:
 
     def __get_scalar(self, field):
         cdef double scalar
-        acados_sim_solver_common.sim_out_get(self.sim_config, self.sim_dims, self.sim_out, field, <void *> &scalar)
+        if field == b"T":
+            acados_sim_solver_common.sim_in_get(self.sim_in, field, <void *> &scalar)
+        else:
+            acados_sim_solver_common.sim_out_get(self.sim_config, self.sim_dims, self.sim_out, field, <void *> &scalar)
         return scalar
 
 
@@ -187,7 +168,17 @@ cdef class AcadosSimSolverCython:
             :param field: string in ['p', 'seed_adj', 'T', 'x', 'u', 'xdot', 'z']
             :param value: the value with appropriate size.
         """
-        settable = ['seed_adj', 'T', 'x', 'u', 'xdot', 'z', 'p'] # S_forw
+        settable = ['seed_adj', 'T', 'x', 'u', 'xdot', 'z', 'p', 't0'] # S_forw
+
+        if field_ not in settable:
+            raise ValueError(f'AcadosSimSolverCython.set(): Unknown field {field_},'
+                f' available fields are {", ".join(settable)}')
+
+        if field_ in ['xdot', 'z'] and self.sim_solver_type != 'IRK':
+            raise ValueError(f'AcadosSimSolverCython.set(): field "{field_}" is only supported for IRK.')
+
+        if field_ == 'T' and self.sim_solver_type == 'GNSF':
+            raise ValueError('AcadosSimSolverCython.set(): field "T" is not supported for GNSF.')
 
         # cast value_ to avoid conversion issues
         if isinstance(value_, (float, int)):

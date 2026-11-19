@@ -3,30 +3,7 @@
 #
 # This file is part of acados.
 #
-# The 2-Clause BSD License
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#
-# 1. Redistributions of source code must retain the above copyright notice,
-# this list of conditions and the following disclaimer.
-#
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-# this list of conditions and the following disclaimer in the documentation
-# and/or other materials provided with the distribution.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-# POSSIBILITY OF SUCH DAMAGE.;
-#
+# Licensed under the 2-Clause BSD License.
 
 import sys
 sys.path.insert(0, 'common')
@@ -99,27 +76,16 @@ def main():
     # set prediction horizon
     ocp.solver_options.tf = Tf
 
-    # TODO: create sim from ocp
-    sim = AcadosSim()
-    sim.model = model
-    sim.solver_options.integrator_type = ocp.solver_options.integrator_type
-    sim.solver_options.T = Tf/N_horizon
-    sim.solver_options.num_stages = ocp.solver_options.sim_method_num_stages
+    sim = AcadosSim.from_ocp(ocp)
 
     # create cython solver
-    solver_json = 'acados_ocp_' + model.name + '.json'
-    AcadosOcpSolver.generate(ocp, json_file=solver_json)
-    AcadosOcpSolver.build(ocp.code_export_directory, with_cython=True)
-    acados_ocp_solver = AcadosOcpSolver.create_cython_solver(solver_json)
+    acados_ocp_solver = AcadosOcpSolver.create_cython_solver(ocp)
 
     # create cython integrator
-    sim_json = 'acados_sim.json'
-    AcadosSimSolver.generate(sim, json_file=sim_json)
-    AcadosSimSolver.build(sim.code_export_directory, with_cython=True)
-    acados_integrator = AcadosSimSolver.create_cython_solver(sim_json)
+    acados_integrator = AcadosSimSolver.create_cython_solver(sim)
 
     # create an integrator with the same settings as used in the OCP solver.
-    # acados_integrator = AcadosSimSolver(ocp, json_file = solver_json)
+    # acados_integrator = AcadosSimSolver(ocp)
     Nsim = 100
     simX = np.zeros((Nsim+1, nx))
     simU = np.zeros((Nsim, nu))
@@ -135,7 +101,7 @@ def main():
         # simulate system
         simX[i+1, :] = acados_integrator.simulate(x=simX[i, :], u=simU[i,:])
 
-    assert np.allclose(simX[-1, :], np.zeros((nx,)), atol=1e-5)
+    np.testing.assert_allclose(simX[-1, :], np.zeros((nx,)), atol=1e-5)
 
     # plot results
     plot_pendulum(np.linspace(0, Tf/N_horizon*Nsim, Nsim+1), Fmax, simU, simX)

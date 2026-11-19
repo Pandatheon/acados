@@ -3,30 +3,7 @@
 #
 # This file is part of acados.
 #
-# The 2-Clause BSD License
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#
-# 1. Redistributions of source code must retain the above copyright notice,
-# this list of conditions and the following disclaimer.
-#
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-# this list of conditions and the following disclaimer in the documentation
-# and/or other materials provided with the distribution.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-# POSSIBILITY OF SUCH DAMAGE.;
-#
+# Licensed under the 2-Clause BSD License.
 
 from typing import Union, List, Optional
 
@@ -36,7 +13,7 @@ import numpy as np
 from .acados_ocp_qp import AcadosOcpQp
 from .acados_ocp_iterate import AcadosOcpIterate, AcadosOcpFlattenedIterate
 from .acados_casadi_ocp_qp import AcadosCasadiOcpQp
-
+from .acados_ocp_qp_solver import AcadosOcpQpOptions
 
 class AcadosCasadiOcpQpSolver:
     """
@@ -52,7 +29,6 @@ class AcadosCasadiOcpQpSolver:
 
     :param qp:             The OCP-structured QP to solve.
     :param solver:         CasADi NLP solver name ('ipopt', 'fatrop'(?), …).
-    :param verbose:        Whether to print solver output. (Not really implemented yet.)
     :param solver_opts:    Optional dictionary of solver options to pass to CasADi.
     """
 
@@ -60,11 +36,14 @@ class AcadosCasadiOcpQpSolver:
         self,
         qp: AcadosOcpQp,
         solver: str = "ipopt",
-        verbose: bool = True,
         solver_opts: Optional[dict] = None,
     ):
         if not isinstance(qp, AcadosOcpQp):
             raise TypeError("qp must be an instance of AcadosOcpQp.")
+        if isinstance(solver_opts, AcadosOcpQpOptions):
+            raise TypeError("solver_opts in AcadosCasadiOcpQpSolver should be a dictionary, not an AcadosOcpQpOptions object.")
+
+        qp.make_consistent()
 
         # build CasADi QP
         casadi_ocp_qp = AcadosCasadiOcpQp(qp)
@@ -122,7 +101,19 @@ class AcadosCasadiOcpQpSolver:
         self.qp_sol_lam_g = sol['lam_g'].full().flatten() if self.casadi_qp['g'].shape[0] > 0 else np.empty(0)
 
         stats = self._casadi_solver.stats()
-        self._status = 0 if stats['success'] == True else stats['return_status']
+        if stats['success'] == True:
+            self._status = 0
+        elif stats['return_status'] in ['Infeasible_Problem_Detected', 'Not_Enough_Degrees_Of_Freedom', 'Restoration_Failed']:
+            self._status = 9 # ACADOS_INFEASIBLE
+        elif stats['return_status'] == 'Restoration_Failed':
+            self._status = 4 # ACADOS_QP_FAILURE
+        elif stats['return_status'] in ['Maximum_WallTime_Exceeded', 'Maximum_CpuTime_Exceeded']:
+            self._status = 7 # ACADOS_TIMEOUT
+        elif stats['return_status'] in ['Diverging_Iterates']:
+            self._status = 6 # ACADOS_UNBOUNDED
+        else:
+            self._status = -1 # ACADOS_UNKNOWN
+
         self._nlp_iter = stats.get('iter_count', None)
         self._time_total = stats.get('t_wall_total', None)
         return self._status
@@ -347,14 +338,13 @@ class AcadosCasadiOcpQpSolver:
             for n in range(self.acados_ocp_qp.N + 1):
                 if n < self.acados_ocp_qp.N or field not in ['u', 'pi', 'z']:
                     traj.append(self.get(n, field))
-            d[f'{field}_traj'] = traj
+            d[f'{field}'] = traj
         return AcadosOcpIterate(**d)
 
     def set_iterate(self, iterate: Union[AcadosOcpIterate, AcadosOcpFlattenedIterate]):
         """Load an iterate for warm-starting."""
         is_flat = isinstance(iterate, AcadosOcpFlattenedIterate)
-        for key, traj in iterate.__dict__.items():
-            field = key.replace('_traj', '')
+        for field, traj in iterate.__dict__.items():
             if field in ['x', 'u', 'pi', 'lam', 'sl', 'su']:
                 if is_flat:
                     self.set_flat(field, getattr(iterate, field))

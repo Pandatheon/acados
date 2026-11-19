@@ -3,33 +3,10 @@
 #
 # This file is part of acados.
 #
-# The 2-Clause BSD License
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#
-# 1. Redistributions of source code must retain the above copyright notice,
-# this list of conditions and the following disclaimer.
-#
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-# this list of conditions and the following disclaimer in the documentation
-# and/or other materials provided with the distribution.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-# POSSIBILITY OF SUCH DAMAGE.;
-#
+# Licensed under the 2-Clause BSD License.
 
 import warnings
-from acados_template import AcadosOcp, AcadosOcpSolver, AcadosModel, AcadosMultiphaseOcp, get_simulink_default_opts
+from acados_template import AcadosOcp, AcadosOcpSolver, AcadosModel, AcadosMultiphaseOcp, AcadosOcpSimulinkOptions
 import numpy as np
 import scipy.linalg
 from utils import plot_pendulum
@@ -48,11 +25,11 @@ PLOT = False
 np.random.seed(1)
 
 if LARGE_SCALE:
-    knots = [np.arange(200),np.arange(200)]
-    data = np.random.random((38416,)).ravel(order='F')
+    knots = [np.arange(2**8),np.arange(2**8)]
+    data = np.random.random(((2**8 - 4)**2,)).ravel(order='F')
 else:
-    knots = [np.arange(20),np.arange(20)]
-    data = 0.1 + 0.*np.random.random((256,)).ravel(order='F')
+    knots = [np.arange(2**4),np.arange(2**4)]
+    data = 0.1 + 0.*np.random.random((2**4 - 4)**2,).ravel(order='F')
 
 def create_p_global(lut=True):
     m = MX.sym("m")
@@ -73,7 +50,7 @@ def create_p_global(lut=True):
 
 
 def export_pendulum_ode_model(p_global, m, l, C, lut=True, blazing=True) -> AcadosModel:
-    model_name = f'pendulum_blazing_{blazing}'
+    model_name = f'blz_{blazing}'
 
     # constants
     m_cart = 1. # mass of the cart [kg]
@@ -147,7 +124,7 @@ def create_ocp_formulation_without_opts(p_global, m, l, C, lut=True, use_p_globa
     # set model
     model = export_pendulum_ode_model(p_global, m, l, C, lut=lut, blazing=blazing)
     model.p_global = p_global
-    model.name += f'_p_global_{use_p_global}'
+    model.name += f'_pglobal_{use_p_global}'
     ocp.model = model
 
     # dimensions
@@ -195,7 +172,7 @@ def create_ocp_formulation_without_opts(p_global, m, l, C, lut=True, use_p_globa
     return ocp
 
 
-def main(use_cython=False, lut=True, use_p_global=True, blazing=True, with_matlab_templates=False, code_export_directory=None):
+def main(use_cython=False, lut=True, use_p_global=True, blazing=True, with_matlab_templates=False, code_export_directory=None, initialize_p_global_with_zeros=False):
 
     print(f"\n\nRunning example with lut={lut}, use_p_global={use_p_global}, {blazing=}")
     p_global, m, l, C, p_global_values = create_p_global(lut=lut)
@@ -206,7 +183,10 @@ def main(use_cython=False, lut=True, use_p_global=True, blazing=True, with_matla
     if not use_p_global:
         ocp.parameter_values = np.concatenate([ocp.parameter_values, p_global_values])
     else:
-        ocp.p_global_values = p_global_values
+        if initialize_p_global_with_zeros:
+            ocp.p_global_values = np.zeros_like(p_global_values)
+        else:
+            ocp.p_global_values = p_global_values
 
     Tf = 1.0
     N_horizon = 20
@@ -217,9 +197,11 @@ def main(use_cython=False, lut=True, use_p_global=True, blazing=True, with_matla
     ocp.solver_options.integrator_type = 'ERK'
     ocp.solver_options.print_level = 0
     ocp.solver_options.nlp_solver_type = 'SQP_RTI'
-    ocp.solver_options.ext_fun_compile_flags += ' -I' + ca.GlobalOptions.getCasadiIncludePath() + ' -ffast-math -march=native'
+
+    ocp.code_gen_options.ext_fun_compile_flags += ' -I' + ca.GlobalOptions.getCasadiIncludePath() + ' -ffast-math -march=native'
     if code_export_directory is not None:
-        ocp.code_export_directory = code_export_directory
+        ocp.code_gen_options.code_export_directory = code_export_directory
+        ocp.code_gen_options.json_file = f"{ocp.model.name}.json"
 
     # set prediction horizon
     ocp.solver_options.tf = Tf
@@ -228,14 +210,12 @@ def main(use_cython=False, lut=True, use_p_global=True, blazing=True, with_matla
     # create ocp solver
     print(f"Creating ocp solver with p_global = {ocp.model.p_global}, p = {ocp.model.p}")
     if with_matlab_templates:
-        ocp.simulink_opts = get_simulink_default_opts()
-    solver_json = 'acados_ocp_' + ocp.model.name + '.json'
+        ocp.simulink_opts = AcadosOcpSimulinkOptions(problem_class='MOCP')
+
     if use_cython:
-        AcadosOcpSolver.generate(ocp, json_file=solver_json)
-        AcadosOcpSolver.build(ocp.code_export_directory, with_cython=True)
-        ocp_solver = AcadosOcpSolver.create_cython_solver(solver_json)
+        ocp_solver = AcadosOcpSolver.create_cython_solver(ocp)
     else:
-        ocp_solver = AcadosOcpSolver(ocp, json_file = solver_json, generate=True, build=True)
+        ocp_solver = AcadosOcpSolver(ocp)
 
     # call SQP_RTI solver in the loop:
     residuals = []
@@ -244,7 +224,7 @@ def main(use_cython=False, lut=True, use_p_global=True, blazing=True, with_matla
         ocp_solver.set_p_global_and_precompute_dependencies(p_global_values)
         t_elapsed = time.time() - t_start
 
-        print(f"Precompute {t_elapsed}.")
+        print(f"Precompute: {1000*t_elapsed:.3f} ms.")
 
     timing = 0
     for i in range(20):
@@ -255,14 +235,15 @@ def main(use_cython=False, lut=True, use_p_global=True, blazing=True, with_matla
 
     # plot results
     if PLOT:
-        u_traj = np.array([ocp_solver.get(i, "u") for i in range(N_horizon)])
-        x_traj = np.array([ocp_solver.get(i, "x") for i in range(N_horizon+1)])
+        iterate = ocp_solver.get_iterate()
+        u_traj = np.array(iterate.u)
+        x_traj = np.array(iterate.x)
         plot_pendulum(ocp.solver_options.shooting_nodes, ocp.constraints.ubu[0], u_traj, x_traj, x_labels=ocp.model.x_labels, u_labels=ocp.model.u_labels)
 
     return residuals, timing
 
 
-def main_mocp(lut=True, use_p_global=True, with_matlab_templates=False):
+def main_mocp(lut=True, use_p_global=True, with_matlab_templates=False, blazing=True, initialize_p_global_with_zeros=False, code_export_directory=None):
     print(f"\n\nRunning multi-phase example with lut={lut}, use_p_global={use_p_global}")
     p_global, m, l, C, p_global_values = create_p_global(lut=lut)
 
@@ -273,8 +254,8 @@ def main_mocp(lut=True, use_p_global=True, with_matlab_templates=False):
     n_phases = 2
     mocp = AcadosMultiphaseOcp(N_list=[10, 10])
 
-    ocp_phase_1 = create_ocp_formulation_without_opts(p_global, m, l, C, lut=lut, use_p_global=use_p_global)
-    ocp_phase_2 = create_ocp_formulation_without_opts(p_global, m, l, C, lut=lut, use_p_global=use_p_global)
+    ocp_phase_1 = create_ocp_formulation_without_opts(p_global, m, l, C, lut=lut, use_p_global=use_p_global, blazing=blazing)
+    ocp_phase_2 = create_ocp_formulation_without_opts(p_global, m, l, C, lut=lut, use_p_global=use_p_global, blazing=blazing)
 
     mocp.set_phase(ocp_phase_1, 0)
     mocp.set_phase(ocp_phase_2, 1)
@@ -283,7 +264,10 @@ def main_mocp(lut=True, use_p_global=True, with_matlab_templates=False):
         for ip in range(n_phases):
             mocp.parameter_values[ip] = np.concatenate([mocp.parameter_values[ip], p_global_values])
     else:
-        mocp.p_global_values = p_global_values
+        if initialize_p_global_with_zeros:
+            mocp.p_global_values = np.zeros_like(p_global_values)
+        else:
+            mocp.p_global_values = p_global_values
 
     # set options
     mocp.solver_options.qp_solver = 'PARTIAL_CONDENSING_HPIPM' # FULL_CONDENSING_QPOASES
@@ -292,9 +276,14 @@ def main_mocp(lut=True, use_p_global=True, with_matlab_templates=False):
     mocp.solver_options.print_level = 0
     mocp.solver_options.nlp_solver_type = 'SQP_RTI' # SQP_RTI, SQP
 
+    if code_export_directory is not None:
+        mocp.code_gen_options.code_export_directory = code_export_directory
+        mocp.code_gen_options.json_file = f"mocp_{mocp.model[0].name}_0.json"
+
+
     if lut:
         # NOTE: these additional flags are required for code generation of CasADi functions using ca.blazing_spline
-        mocp.solver_options.ext_fun_compile_flags = '-I' + ca.GlobalOptions.getCasadiIncludePath() + ' -ffast-math -march=native'
+        mocp.code_gen_options.ext_fun_compile_flags = '-I' + ca.GlobalOptions.getCasadiIncludePath() + ' -ffast-math -march=native'
 
     # set prediction horizon
     mocp.solver_options.tf = Tf
@@ -304,7 +293,7 @@ def main_mocp(lut=True, use_p_global=True, with_matlab_templates=False):
     print(f"Creating ocp solver with p_global = {mocp.model[0].p_global}, p_phase_1 = {mocp.model[0].p}, p_phase_2 = {mocp.model[1].p}")
 
     if with_matlab_templates:
-        mocp.simulink_opts = get_simulink_default_opts()
+        mocp.simulink_opts = AcadosOcpSimulinkOptions(problem_class='MOCP')
     ocp_solver = AcadosOcpSolver(mocp, generate=True, build=True)
 
     # call SQP_RTI solver in the loop:
@@ -320,7 +309,7 @@ def main_mocp(lut=True, use_p_global=True, with_matlab_templates=False):
         residuals+= list(ocp_solver.get_residuals(recompute=True))
         timing += ocp_solver.get_stats('time_lin')
 
-    return residuals, timing, mocp.code_gen_opts.json_file
+    return residuals, timing, mocp.code_gen_options.json_file
 
 def main_mocp_json_load(json_file: str):
     warnings.filterwarnings("ignore", message=".*not in dictionary.*", category=UserWarning)
@@ -333,7 +322,7 @@ def main_mocp_json_load(json_file: str):
 
     timing = 0
     for i in range(20):
-        status = ocp_solver.solve()
+        _ = ocp_solver.solve()
         # ocp_solver.print_statistics()
         residuals+= list(ocp_solver.get_residuals(recompute=True))
         timing += ocp_solver.get_stats('time_lin')
@@ -367,12 +356,13 @@ if __name__ == "__main__":
 
     # MOCP tests
     res_mocp_nolut_p, _, mocp_json_file = main_mocp(use_p_global=False, lut=False)
-    res_mocp_nolut_p_global, _, mocp_json_file = main_mocp(use_p_global=True, lut=False)
+    res_mocp_nolut_p_global, _, mocp_json_file = main_mocp(use_p_global=True, lut=False, initialize_p_global_with_zeros=True)
     np.testing.assert_almost_equal(ref_nolut, res_mocp_nolut_p)
     np.testing.assert_almost_equal(ref_nolut, res_mocp_nolut_p_global)
 
+    with_matlab_templates = True
     res_mocp_lut_p, _, mocp_json_file = main_mocp(use_p_global=False, lut=True)
-    res_mocp_lut_p_global, _, mocp_json_file = main_mocp(use_p_global=True, lut=True, with_matlab_templates=True)
+    res_mocp_lut_p_global, _, mocp_json_file = main_mocp(use_p_global=True, lut=True, with_matlab_templates=with_matlab_templates)
     res_mocp_load, _ = main_mocp_json_load(mocp_json_file)
 
     np.testing.assert_almost_equal(res_mocp_load, res_mocp_lut_p_global)
@@ -383,4 +373,6 @@ if __name__ == "__main__":
         np.testing.assert_almost_equal(ref_lut, ref_nolut)
 
     # to test transfer to MATLAB/Octave
-    res_lut, t_lin_lut = main(use_cython=False, use_p_global=True, lut=True, with_matlab_templates=True, code_export_directory='c_generated_code_single_phase')
+    res_mocp_lut_p_global, _, mocp_json_file = main_mocp(use_p_global=True, lut=True, blazing=True, with_matlab_templates=with_matlab_templates, code_export_directory='c_generated_code_multi_phase')
+
+    res_lut, t_lin_lut = main(use_cython=False, use_p_global=True, lut=True, blazing=True, with_matlab_templates=with_matlab_templates, code_export_directory='c_generated_code_single_phase')

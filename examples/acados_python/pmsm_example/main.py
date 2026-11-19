@@ -3,30 +3,7 @@
 #
 # This file is part of acados.
 #
-# The 2-Clause BSD License
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#
-# 1. Redistributions of source code must retain the above copyright notice,
-# this list of conditions and the following disclaimer.
-#
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-# this list of conditions and the following disclaimer in the documentation
-# and/or other materials provided with the distribution.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-# POSSIBILITY OF SUCH DAMAGE.;
-#
+# Licensed under the 2-Clause BSD License.
 
 from acados_template import AcadosModel, AcadosOcp, AcadosOcpSolver
 from casadi import SX, vertcat, sqrt, cos, sin
@@ -424,24 +401,22 @@ def run_simulation(qp_solver="FULL_CONDENSING_HPIPM", show_plots=False, verbose=
     ocp.solver_options.nlp_solver_type = "SQP_RTI"
     # ocp.solver_options.nlp_solver_type = 'SQP'
 
-    file_name = "acados_ocp.json"
-
-    acados_solver = AcadosOcpSolver(ocp, json_file=file_name)
+    solver = AcadosOcpSolver(ocp)
 
     # test setter:
     for i in range(1,N):
-        acados_solver.cost_set(i, 'zl', ocp.cost.zl)
-        acados_solver.cost_set(i, 'zu', ocp.cost.zu)
-        acados_solver.cost_set(i, 'Zl', ocp.cost.Zl)
-        acados_solver.cost_set(i, 'Zu', ocp.cost.Zu)
-        acados_solver.cost_set(i, 'W', ocp.cost.W)
-        acados_solver.cost_set(i, 'yref', ocp.cost.yref)
+        solver.cost_set(i, 'zl', ocp.cost.zl)
+        solver.cost_set(i, 'zu', ocp.cost.zu)
+        solver.cost_set(i, 'Zl', ocp.cost.Zl)
+        solver.cost_set(i, 'Zu', ocp.cost.Zu)
+        solver.cost_set(i, 'W', ocp.cost.W)
+        solver.cost_set(i, 'yref', ocp.cost.yref)
 
     # test constraints set with polytopic constraints
-    acados_solver.constraints_set(1, "lg", lg)
-    acados_solver.constraints_set(1, "ug", ug)
-    acados_solver.constraints_set(1, "D", D, api="new")
-    acados_solver.constraints_set(1, "C", C, api="new")
+    solver.constraints_set(1, "lg", lg)
+    solver.constraints_set(1, "ug", ug)
+    solver.constraints_set(1, "D", D, api="new")
+    solver.constraints_set(1, "C", C, api="new")
 
     # closed loop simulation
     Nsim = 20
@@ -468,7 +443,7 @@ def run_simulation(qp_solver="FULL_CONDENSING_HPIPM", show_plots=False, verbose=
 
     # compute warm-start
     for i in range(WARMSTART_ITERS):
-        status = acados_solver.solve()
+        status = solver.solve()
 
     for i in range(Nsim):
         if verbose:
@@ -477,19 +452,19 @@ def run_simulation(qp_solver="FULL_CONDENSING_HPIPM", show_plots=False, verbose=
             print("=================")
 
         # set options
-        acados_solver.options_set("print_level", 0)
-        status = acados_solver.solve()
+        solver.options_set("print_level", 0)
+        status = solver.solve()
 
         if status != 0:
-            acados_solver.print_statistics()
+            solver.print_statistics()
             raise Exception(f"acados returned status {status} in simulation step {i}.")
 
         # get solution
-        x0 = acados_solver.get(0, "x")
-        xN = acados_solver.get(N, "x")
-        u0 = acados_solver.get(0, "u")
+        x0 = solver.get(0, "x")
+        xN = solver.get(N, "x")
+        u0 = solver.get(0, "u")
 
-        CPU_time = acados_solver.get_stats("time_tot")
+        CPU_time = solver.get_stats("time_tot")
 
         for j in range(nx):
             simX[i, j] = x0[j]
@@ -534,17 +509,17 @@ def run_simulation(qp_solver="FULL_CONDENSING_HPIPM", show_plots=False, verbose=
             print("\n")
 
         # update initial condition xk+1
-        acados_solver.constraints_set(0, "lbx", xvec_arg)
-        acados_solver.constraints_set(0, "ubx", xvec_arg)
+        solver.constraints_set(0, "lbx", xvec_arg)
+        solver.constraints_set(0, "ubx", xvec_arg)
 
         for j in range(N):
-            acados_solver.cost_set(j, "W", nlp_cost.W)
-        acados_solver.cost_set(N, "W", nlp_cost.W_e)
+            solver.cost_set(j, "W", nlp_cost.W)
+        solver.cost_set(N, "W", nlp_cost.W_e)
 
         simXR[i + 1, 0] = xvec[0]
         simXR[i + 1, 1] = xvec[1]
 
-    del acados_solver
+    del solver
 
     # tests
     xref_sol = np.array([[-77.39723565], [77.84933005]])
@@ -594,13 +569,13 @@ def run_simulation(qp_solver="FULL_CONDENSING_HPIPM", show_plots=False, verbose=
         r = 2 / 3 * u_max
         x1 = r
         y1 = 0
-        x2 = r * cos(pi / 3)
-        y2 = r * sin(pi / 3)
+        x2 = r * cos(np.pi / 3)
+        y2 = r * sin(np.pi / 3)
         q1 = -(y2 - y1 / x1 * x2) / (1 - x2 / x1)
         m1 = -(y1 + q1) / x1
 
         # box constraints
-        q2 = r * sin(pi / 3)
+        q2 = r * sin(np.pi / 3)
         # -q2 <= uq  <= q2
 
         plt.figure()

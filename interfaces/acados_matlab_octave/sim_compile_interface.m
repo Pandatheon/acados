@@ -3,29 +3,7 @@
 %
 % This file is part of acados.
 %
-% The 2-Clause BSD License
-%
-% Redistribution and use in source and binary forms, with or without
-% modification, are permitted provided that the following conditions are met:
-%
-% 1. Redistributions of source code must retain the above copyright notice,
-% this list of conditions and the following disclaimer.
-%
-% 2. Redistributions in binary form must reproduce the above copyright notice,
-% this list of conditions and the following disclaimer in the documentation
-% and/or other materials provided with the distribution.
-%
-% THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-% AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-% IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-% ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-% LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-% CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-% SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-% INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-% CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-% ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-% POSSIBILITY OF SUCH DAMAGE.;
+% Licensed under the 2-Clause BSD License.
 
 %
 
@@ -37,8 +15,11 @@ function sim_compile_interface(output_dir)
 
     % set paths
     acados_mex_folder = fullfile(acados_folder, 'interfaces', 'acados_matlab_octave');
-    acados_include = ['-I' acados_folder];
-    acados_interfaces_include = ['-I' fullfile(acados_folder, 'interfaces')];
+    acados_include = ['-I' fullfile(acados_folder, 'include')];
+    acados_interfaces_include = ['-I' fullfile(acados_folder, 'include')];
+    external_include = ['-I' fullfile(acados_folder, 'external')];
+    blasfeo_include = ['-I' fullfile(acados_folder, 'include', 'blasfeo', 'include')];
+    hpipm_include = ['-I' fullfile(acados_folder, 'include', 'hpipm', 'include')];
     acados_lib_path = ['-L' fullfile(acados_folder, 'lib')];
 
     mex_names = { ...
@@ -78,11 +59,11 @@ function sim_compile_interface(output_dir)
         disp(['compiling ', mex_files{ii}])
         if is_octave()
     %        mkoctfile -p CFLAGS
-            mex(acados_include, acados_interfaces_include, acados_lib_path,...
+            mex(acados_include, acados_interfaces_include, external_include, blasfeo_include, hpipm_include, acados_lib_path,...
                 '-lacados', '-lhpipm', '-lblasfeo', mex_files{ii})
         else
             FLAGS = 'CFLAGS=$CFLAGS -std=c99';
-            mex(mex_flags, FLAGS, acados_include, acados_interfaces_include, acados_lib_path, ...
+            mex(mex_flags, FLAGS, acados_include, acados_interfaces_include, external_include, blasfeo_include, hpipm_include, acados_lib_path, ...
                 '-lacados', '-lhpipm', '-lblasfeo', mex_files{ii}, '-outdir', output_dir)
         end
     end

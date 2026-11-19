@@ -3,30 +3,7 @@
 #
 # This file is part of acados.
 #
-# The 2-Clause BSD License
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#
-# 1. Redistributions of source code must retain the above copyright notice,
-# this list of conditions and the following disclaimer.
-#
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-# this list of conditions and the following disclaimer in the documentation
-# and/or other materials provided with the distribution.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-# POSSIBILITY OF SUCH DAMAGE.;
-#
+# Licensed under the 2-Clause BSD License.
 import numpy as np
 from acados_template import AcadosOcpSolver
 from sensitivity_utils import export_parametric_ocp, plot_pendulum
@@ -52,13 +29,13 @@ def main(qp_solver_ric_alg: int, generate_solvers=True, plot_trajectory=False):
     with_nonlinear_constraint = True
 
     ocp = export_parametric_ocp(x0=x0, N_horizon=N_horizon, T_horizon=T_horizon, Fmax=Fmax, qp_solver_ric_alg=1, cost_scale_as_extra_param=cost_scale_as_extra_param, with_parametric_constraint=with_parametric_constraint, with_nonlinear_constraint=with_nonlinear_constraint, scale_path_cost=True)
-    ocp_solver = AcadosOcpSolver(ocp, json_file="parameter_augmented_acados_ocp.json", generate=generate_solvers, build=generate_solvers)
+    ocp_solver = AcadosOcpSolver(ocp, generate=generate_solvers, build=generate_solvers)
 
     # create sensitivity solver
     ocp = export_parametric_ocp(x0=x0, N_horizon=N_horizon, T_horizon=T_horizon, Fmax=Fmax, hessian_approx='EXACT', qp_solver_ric_alg=qp_solver_ric_alg, cost_scale_as_extra_param=cost_scale_as_extra_param, with_parametric_constraint=with_parametric_constraint, with_nonlinear_constraint=with_nonlinear_constraint, scale_path_cost=True)
     ocp.model.name = 'sensitivity_solver'
     ocp.code_export_directory = f'c_generated_code_{ocp.model.name}'
-    sensitivity_solver = AcadosOcpSolver(ocp, json_file=f"{ocp.model.name}.json", generate=generate_solvers, build=generate_solvers)
+    sensitivity_solver = AcadosOcpSolver(ocp, generate=generate_solvers, build=generate_solvers)
 
     if cost_scale_as_extra_param:
         p_vals = [
@@ -68,7 +45,7 @@ def main(qp_solver_ric_alg: int, generate_solvers=True, plot_trajectory=False):
             np.array([p_nominal + 0.4, 1.0]),
         ]
     else:
-        p_vals = np.array([p_test])
+        p_vals = [np.array([p_test])]
 
     for p_val in p_vals:
         print(f"Testing with p_val = {p_val}")
@@ -79,14 +56,10 @@ def main(qp_solver_ric_alg: int, generate_solvers=True, plot_trajectory=False):
     if plot_trajectory:
         nx = ocp.dims.nx
         nu = ocp.dims.nu
-        simX = np.zeros((N_horizon+1, nx))
-        simU = np.zeros((N_horizon, nu))
-
         # get solution
-        for i in range(N_horizon):
-            simX[i,:] = ocp_solver.get(i, "x")
-            simU[i,:] = ocp_solver.get(i, "u")
-        simX[N_horizon,:] = ocp_solver.get(N_horizon, "x")
+        iterate = ocp_solver.get_iterate()
+        simX = np.array(iterate.x)
+        simU = np.array(iterate.u)
 
         plot_pendulum(ocp.solver_options.shooting_nodes, Fmax, simU, simX, latexify=True, time_label=ocp.model.t_label, x_labels=ocp.model.x_labels, u_labels=ocp.model.u_labels)
 

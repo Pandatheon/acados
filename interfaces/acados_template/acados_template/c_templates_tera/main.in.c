@@ -3,29 +3,7 @@
  *
  * This file is part of acados.
  *
- * The 2-Clause BSD License
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright notice,
- * this list of conditions and the following disclaimer.
- *
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- * this list of conditions and the following disclaimer in the documentation
- * and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.;
+ * Licensed under the 2-Clause BSD License.
  */
 
 {%- if not solver_options.custom_update_filename %}
@@ -137,7 +115,7 @@ int main()
     d_print_exp_tran_mat( NX, N+1, xtraj, NX);
     printf("\n--- utraj ---\n");
     d_print_exp_tran_mat( NU, N, utraj, NU );
-    // ocp_nlp_out_print(nlp_solver->dims, nlp_out);
+    // print_ocp_nlp_out(nlp_solver->dims, nlp_out);
 
     printf("\nsolved ocp %d times, solution printed above\n\n", NTIMINGS);
 
@@ -165,11 +143,10 @@ int main()
     printf(" SQP iterations %2d\n minimum time for %d solve %f [ms]\n KKT %e\n",
            sqp_iter, NTIMINGS, min_time*1000, kkt_norm_inf);
 
-{% if solver_options.with_solution_sens_wrt_params %}
+{% if code_gen_options.with_solution_sens_wrt_params_adj %}
     // evaluate adjoint solution sensitivities wrt p_global
     ocp_nlp_out *sens_out = {{ name }}_acados_get_sens_out(acados_ocp_capsule);
     ocp_nlp_out_set_values_to_zero(nlp_config, nlp_dims, sens_out);
-    ocp_nlp_eval_params_jac(nlp_solver, nlp_in, nlp_out);
     double tmp_p_global[NP_GLOBAL];
     ocp_nlp_eval_solution_sens_adj_p(nlp_solver, nlp_in, sens_out, "p_global", 0, tmp_p_global);
     printf("\nSucessfully evaluated adjoint solution sensitivities wrt p_global.\n");

@@ -3,29 +3,7 @@
  *
  * This file is part of acados.
  *
- * The 2-Clause BSD License
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright notice,
- * this list of conditions and the following disclaimer.
- *
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- * this list of conditions and the following disclaimer in the documentation
- * and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.;
+ * Licensed under the 2-Clause BSD License.
  */
 
 
@@ -211,50 +189,6 @@ int sim_erk_model_set(void *model_, const char *field, void *value)
  * opts
  ************************************************/
 
-acados_size_t sim_erk_opts_calculate_size(void *config_, void *dims)
-{
-    int ns_max = NS_MAX;
-
-    acados_size_t size = sizeof(sim_opts);
-
-    size += ns_max * ns_max * sizeof(double);  // A_mat
-    size += ns_max * sizeof(double);           // b_vec
-    size += ns_max * sizeof(double);           // c_vec
-
-    make_int_multiple_of(8, &size);
-    size += 1 * 8;
-
-    return size;
-}
-
-
-
-void *sim_erk_opts_assign(void *config_, void *dims, void *raw_memory)
-{
-    int ns_max = NS_MAX;
-
-    char *c_ptr = (char *) raw_memory;
-
-    sim_opts *opts = (sim_opts *) c_ptr;
-    c_ptr += sizeof(sim_opts);
-
-    align_char_to(8, &c_ptr);
-
-    assign_and_advance_double(ns_max * ns_max, &opts->A_mat, &c_ptr);
-    assign_and_advance_double(ns_max, &opts->b_vec, &c_ptr);
-    assign_and_advance_double(ns_max, &opts->c_vec, &c_ptr);
-
-    assert((char *) raw_memory + sim_erk_opts_calculate_size(config_, dims) >= c_ptr);
-
-    opts->newton_iter = 0;
-    // opts->scheme = NULL;
-    opts->jac_reuse = false;
-
-    return (void *) opts;
-}
-
-
-
 void sim_erk_opts_set(void *config_, void *opts_, const char *field, void *value)
 {
     sim_opts *opts = (sim_opts *) opts_;
@@ -299,6 +233,9 @@ void sim_erk_opts_initialize_default(void *config_, void *dims_, void *opts_)
 
     opts->output_z = false;
     opts->sens_algebraic = false;
+
+    opts->newton_iter = 0;
+    opts->jac_reuse = false;
 }
 
 
@@ -381,19 +318,11 @@ int sim_erk_memory_set(void *config_, void *dims_, void *mem_, const char *field
 
 
 
-int sim_erk_memory_set_to_zero(void *config_, void * dims_, void *opts_, void *mem_, const char *field)
+int sim_erk_memory_set_to_zero(void *config_, void * dims_, void *opts_, void *mem_)
 {
     int status = ACADOS_SUCCESS;
 
-    if (!strcmp(field, "guesses"))
-    {
-        // no guesses/initialization in ERK
-    }
-    else
-    {
-        printf("sim_erk_memory_set_to_zero field %s is not supported! \n", field);
-        exit(1);
-    }
+    // no memory to set to zero in ERK
 
     return status;
 }
@@ -687,6 +616,11 @@ int sim_erk(void *config_, sim_in *in, sim_out *out, void *opts_, void *mem_, vo
         printf("sim_erk: opts->sens_algebraic should be false - DAEs are not supported for the ERK integrator\n");
         exit(1);
     }
+
+    // printf("ERK:sens_adj %d, sens_hess %d, seed S_adj \n", opts->sens_adj, opts->sens_hess);
+    // for (int i = 0; i < nx; i++)
+    //     printf("%f\t", in->S_adj[i]);
+    // printf("\n");
 
     int nf = opts->num_forw_sens;
     if (!opts->sens_forw && !opts->sens_forw_p) nf = 0;
@@ -1053,8 +987,8 @@ void sim_erk_config_initialize_default(void *config_)
 {
     sim_config *config = config_;
 
-    config->opts_calculate_size = &sim_erk_opts_calculate_size;
-    config->opts_assign = &sim_erk_opts_assign;
+    config->opts_calculate_size = &sim_opts_calculate_size;
+    config->opts_assign = &sim_opts_assign;
     config->opts_initialize_default = &sim_erk_opts_initialize_default;
     config->opts_update = &sim_erk_opts_update;
     config->opts_set = &sim_erk_opts_set;

@@ -94,6 +94,10 @@ env/
 # Examples #
 c_generated_code
 *_generated_code*
+codegen_ocp*
+codegen_mocp*
+codegen_sim*
+
 
 # Misc #
 ########
@@ -124,6 +128,7 @@ build*
 _autogen
 tags
 compile_commands.json
+.dir-locals.el
 
 *.pkl
 private*
@@ -136,3 +141,7 @@ qp_out*.txt
 figures
 examples/**/*.pdf
 examples/**/*.png
+
+# gprofng #
+###########
+*.er

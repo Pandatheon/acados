@@ -1,0 +1,129 @@
+# Copyright (c) The acados authors.
+#
+# This file is part of acados.
+#
+# Licensed under the 2-Clause BSD License.
+
+import sys
+sys.path.insert(0, '../getting_started')
+
+import numpy as np
+import casadi as ca
+
+from acados_template import AcadosOcp, AcadosOcpSolver, AcadosCasadiOcpSolver
+from pendulum_model import export_pendulum_ode_model
+
+def formulate_ocp(Tf: float = 1.0, N: int = 20)-> AcadosOcp:
+    # create ocp object to formulate the OCP
+    ocp = AcadosOcp()
+
+    # set model
+    model = export_pendulum_ode_model()
+    # add dummy control
+    model.u = ca.vertcat(model.u, ca.SX.sym('dummy_u'))
+    ocp.model = model
+
+    # set h constraints
+    ocp.model.con_h_expr_0 = ca.norm_2(model.x)
+    ocp.constraints.lh_0 = np.array([0])
+    ocp.constraints.uh_0 = np.array([3.16])
+
+    nx = model.x.rows()
+    nu = model.u.rows()
+    
+    # set prediction horizon
+    ocp.solver_options.N_horizon = N
+    ocp.solver_options.tf = Tf
+
+    # cost matrices
+    Q_mat = 2*np.diag([1e3, 1e3, 1e-2, 1e-2])
+    R_mat = 2*np.diag([1e-2, 1e-2])
+
+    # path cost
+    ocp.cost.cost_type = 'NONLINEAR_LS'
+    ocp.model.cost_y_expr = ca.vertcat(model.x, model.u)
+    ocp.cost.yref = np.zeros((nx+nu,))
+    ocp.cost.W = ca.diagcat(Q_mat, R_mat).full()
+
+    # terminal cost
+    ocp.cost.cost_type_e = 'NONLINEAR_LS'
+    ocp.cost.yref_e = np.zeros((nx,))
+    ocp.model.cost_y_expr_e = model.x
+    ocp.cost.W_e = Q_mat
+
+    # set constraints
+    Fmax = 80
+    ocp.constraints.lbu = np.array([-Fmax])
+    ocp.constraints.ubu = np.array([+Fmax])
+    ocp.constraints.idxbu = np.array([0])
+
+    ocp.constraints.x0 = np.array([0, np.pi, 0, 0])  # initial state
+    ocp.constraints.idxbx_0 = np.array([0, 1, 2, 3])
+
+    # set partial bounds for state
+    ocp.constraints.lbx = np.array([-10,-10])
+    ocp.constraints.ubx = np.array([10,10])
+    ocp.constraints.idxbx = np.array([0,3])
+
+    # set options
+    ocp.solver_options.qp_solver = 'PARTIAL_CONDENSING_HPIPM' # FULL_CONDENSING_QPOASES
+    ocp.solver_options.hessian_approx = 'GAUSS_NEWTON' # 'GAUSS_NEWTON', 'EXACT'
+    ocp.solver_options.integrator_type = 'ERK'
+    ocp.solver_options.nlp_solver_type = 'SQP' # SQP_RTI, SQP
+    ocp.solver_options.globalization = 'MERIT_BACKTRACKING' # turns on globalization
+    
+    return ocp
+
+
+
+def main(casadi_solver_name="fatrop", use_acados_hessian=False):
+    ocp = formulate_ocp()
+
+    initial_iterate = ocp.create_default_initial_iterate()
+
+    ## solve using acados
+    # create acados solver
+    ocp_solver = AcadosOcpSolver(ocp, verbose=False)
+    # initialize solver
+    ocp_solver.set_iterate(initial_iterate)
+    # solve with acados
+    status = ocp_solver.solve()
+    ocp_solver.print_statistics()
+    # get solution
+    result_acados = ocp_solver.get_iterate()
+    result_acados_flat = ocp_solver.get_flat_iterate()
+
+    ## solve using casadi
+    casadi_solver_opts = {}
+    if casadi_solver_name == "fatrop":
+        casadi_solver_opts["expand"] = True
+        casadi_solver_opts["fatrop"] = {"mu_init": 0.1}
+        casadi_solver_opts["structure_detection"] = "auto"
+        casadi_solver_opts["debug"] = True
+
+    if use_acados_hessian:
+        # ocp.solver_options.hessian_approx = "EXACT"
+        ocp.solver_options.fixed_hess = False
+
+    print(f"Using Casadi solver {casadi_solver_name}.")
+    casadi_ocp_solver = AcadosCasadiOcpSolver(ocp, 
+                                              verbose=False, 
+                                              solver=casadi_solver_name, 
+                                              casadi_solver_opts=casadi_solver_opts, 
+                                              use_acados_hessian=use_acados_hessian)
+    casadi_ocp_solver.set_iterate(result_acados)
+    status = casadi_ocp_solver.solve()
+    print(f"Casadi solver returned status {status}.")
+    result_casadi_flat = casadi_ocp_solver.get_flat_iterate()
+
+    nlp_iter_ca = casadi_ocp_solver.get_stats("nlp_iter")
+    print(f"Casadi solver finished after {nlp_iter_ca} iterations.")
+
+    if not result_acados_flat.allclose(result_casadi_flat, atol=1e-4, rtol=1e-4):
+        raise Exception("Casadi solver result does not match acados solver result.")
+
+if __name__ == "__main__":
+    main(casadi_solver_name="ipopt")
+    # NOTE CasADi+fatrop cannot be used alongside acados with CasADi v3.8.0, cf https://github.com/casadi/casadi/issues/4395
+    # TODO(@anton) Re-enable this when the blasfeo version is the same between casadi, fatrop, and acados.
+    # main(casadi_solver_name="fatrop")

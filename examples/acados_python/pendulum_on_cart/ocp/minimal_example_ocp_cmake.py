@@ -3,30 +3,7 @@
 #
 # This file is part of acados.
 #
-# The 2-Clause BSD License
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#
-# 1. Redistributions of source code must retain the above copyright notice,
-# this list of conditions and the following disclaimer.
-#
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-# this list of conditions and the following disclaimer in the documentation
-# and/or other materials provided with the distribution.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-# POSSIBILITY OF SUCH DAMAGE.;
-#
+# Licensed under the 2-Clause BSD License.
 
 import sys
 import os
@@ -101,6 +78,8 @@ def create_ocp() -> AcadosOcp:
     # set prediction horizon
     ocp.solver_options.tf = T_HORIZON
 
+    ocp.code_gen_options.code_export_directory = 'c_generated_code'
+
     return ocp
 
 
@@ -111,7 +90,7 @@ def test_cmake_link_libs():
     # do not link against blasfeo, hpipm, m -> this should fail
     cmake_builder.additional_cmake_options = '-DACADOS_LINK_LIBS=""'
     try:
-        ocp_solver = AcadosOcpSolver(ocp, json_file='acados_ocp.json', cmake_builder=cmake_builder)
+        _ = AcadosOcpSolver(ocp, cmake_builder=cmake_builder)
         raise Exception('should have failed')
     except Exception as e:
         print(f'expected exception: {e}')
@@ -146,10 +125,9 @@ def test_cmake():
         raise Exception(f'acados returned status {status}.')
 
     # get solution
-    for i in range(N):
-        simX[i,:] = ocp_solver.get(i, "x")
-        simU[i,:] = ocp_solver.get(i, "u")
-    simX[N,:] = ocp_solver.get(N, "x")
+    iterate = ocp_solver.get_iterate()
+    simX[:] = iterate.x
+    simU[:] = iterate.u
 
     plot_pendulum(np.linspace(0, T_HORIZON, N+1), FMAX, simU, simX, latexify=True)
 
@@ -164,10 +142,8 @@ def test_cmake_bin_mingw():
     ocp.acados_lib_path = os.path.join(get_acados_path(), 'bin').replace(os.sep, '/')
     ocp_solver = AcadosOcpSolver(ocp, cmake_builder=cmake_builder)
 
-    status = ocp_solver.solve()
-
+    _ = ocp_solver.solve()
     ocp_solver.print_statistics()
-    plot_pendulum(np.linspace(0, T_HORIZON, N+1), FMAX, simU, simX, latexify=True)
 
 
 if __name__ == "__main__":

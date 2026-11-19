@@ -3,29 +3,7 @@
 %
 % This file is part of acados.
 %
-% The 2-Clause BSD License
-%
-% Redistribution and use in source and binary forms, with or without
-% modification, are permitted provided that the following conditions are met:
-%
-% 1. Redistributions of source code must retain the above copyright notice,
-% this list of conditions and the following disclaimer.
-%
-% 2. Redistributions in binary form must reproduce the above copyright notice,
-% this list of conditions and the following disclaimer in the documentation
-% and/or other materials provided with the distribution.
-%
-% THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-% AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-% IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-% ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-% LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-% CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-% SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-% INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-% CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-% ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-% POSSIBILITY OF SUCH DAMAGE.;
+% Licensed under the 2-Clause BSD License.
 
 
 
@@ -44,6 +22,7 @@ classdef AcadosSimOptions < handle
         sens_algebraic
         sens_hess
         output_z
+        exact_z_output
         ext_fun_compile_flags
         ext_fun_expand_dyn
         compile_interface
@@ -61,12 +40,16 @@ classdef AcadosSimOptions < handle
             obj.newton_iter = 3;
             obj.newton_tol = 0.;
             obj.sens_forw = true;
-            obj.sens_forw_p = false;     % default: disabled
             obj.sens_adj = false;
             obj.sens_algebraic = false;
             obj.sens_hess = false;
             obj.output_z = true;
+            obj.exact_z_output = false;
             obj.jac_reuse = 0;
+            obj.compile_interface = []; % corresponds to automatic detection, possible values: true, false, []
+            obj.with_batch_functionality = false;
+
+            % TODO the options below are deprecated and will be removed
             % check whether flags are provided by environment variable
             env_var = getenv("ACADOS_EXT_FUN_COMPILE_FLAGS");
             if isempty(env_var)
@@ -75,8 +58,7 @@ classdef AcadosSimOptions < handle
                 obj.ext_fun_compile_flags = env_var;
             end
             obj.ext_fun_expand_dyn = false;
-            obj.with_batch_functionality = false;
-            obj.compile_interface = []; % corresponds to automatic detection, possible values: true, false, []
+            obj.sens_forw_p = false;     % default: disabled
         end
 
         function s = to_struct(self)
@@ -94,6 +76,35 @@ classdef AcadosSimOptions < handle
                     s.(out_name) = self.(property_name);
                 else
                     s.(property_name) = self.(property_name);
+                end
+            end
+        end
+    end
+    methods (Static)
+        function obj = from_struct(s)
+            % Create AcadosSimOptions from a struct (e.g. decoded from JSON).
+            if ~isstruct(s)
+                error('from_struct input must be a struct.');
+            end
+
+            obj = AcadosSimOptions();
+            sim_method_fields = {'num_stages', 'num_steps', 'newton_iter', 'jac_reuse', 'newton_tol'};
+            fields = fieldnames(s);
+            for i = 1:length(fields)
+                f = fields{i};
+                property_name = f;
+                for j = 1:length(sim_method_fields)
+                    if strcmp(f, ['sim_method_' sim_method_fields{j}])
+                        property_name = sim_method_fields{j};
+                        break
+                    end
+                end
+
+                try
+                    obj.(property_name) = s.(f);
+                catch
+                    % ignore unknown fields
+                    warning(['Could not assign field ' f ' in AcadosSimOptions.from_struct']);
                 end
             end
         end

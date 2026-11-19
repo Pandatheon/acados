@@ -3,29 +3,7 @@
 %
 % This file is part of acados.
 %
-% The 2-Clause BSD License
-%
-% Redistribution and use in source and binary forms, with or without
-% modification, are permitted provided that the following conditions are met:
-%
-% 1. Redistributions of source code must retain the above copyright notice,
-% this list of conditions and the following disclaimer.
-%
-% 2. Redistributions in binary form must reproduce the above copyright notice,
-% this list of conditions and the following disclaimer in the documentation
-% and/or other materials provided with the distribution.
-%
-% THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-% AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-% IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-% ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-% LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-% CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-% SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-% INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-% CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-% ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-% POSSIBILITY OF SUCH DAMAGE.;
+% Licensed under the 2-Clause BSD License.
 
 %
 
@@ -42,6 +20,7 @@ targets = {
     '../getting_started/extensive_example_ocp.m';
     '../getting_started/minimal_example_sim.m';
     '../getting_started/minimal_example_ocp.m';
+    '../getting_started/minimal_example_closed_loop.m';
     '../linear_mass_spring_model/example_ocp.m';
     '../linear_mpc/main.m';
     '../lorentz/example_mhe.m';
@@ -56,15 +35,13 @@ targets = {
     '../swarming/example_ocp.m';
     '../wind_turbine_nx6/example_ocp.m';
     '../mocp_transition_example/main_multiphase_ocp.m';
-    '../legacy_interface/getting_started/extensive_example_ocp.m';
-    '../legacy_interface/simple_dae_model/example_ocp.m';
     '../dense_nlp/convex_problem_globalization_necessary.m';
+    '../pendulum_on_cart_model/example_sim.m';
 };
 
 
 % not tested on CI
 other_targets = {
-    '../getting_started/minimal_example_closed_loop.m';
     '../getting_started/simulink_example.m';
     '../getting_started/simulink_example_advanced.m';
     '../linear_mass_spring_model/example_closed_loop.m';
@@ -74,16 +51,13 @@ other_targets = {
     '../pendulum_on_cart_model/example_ocp_custom_hess.m';
     '../pendulum_on_cart_model/example_ocp_param_sens.m';
     '../pendulum_on_cart_model/example_ocp_reg.m';
-    '../pendulum_on_cart_model/example_sim.m';
     '../pendulum_on_cart_model/example_solution_sens_closed_loop.m';
     '../pendulum_on_cart_model/experiment_dae_formulation.m';
     '../swarming/example_closed_loop.m';
     '../swarming/example_sim.m';
     '../wind_turbine_nx6/example_closed_loop.m';
     '../wind_turbine_nx6/example_sim.m';
-
     './test_checks.m';
-    './test_mhe_lorentz.m';
     './test_ocp_OSQP.m';
     './test_ocp_linear_mass_spring.m';
     './test_ocp_pendulum_dae.m';
@@ -117,9 +91,9 @@ for idx = 1:length(targets)
         run(targets{idx});
         test_val = true;
     catch exception
-        setenv("TEST_MESSAGE", exception.message)
-        warning(exception.message);
-        clear exception
+        report = getReport(exception, 'extended', 'hyperlinks', 'off');
+        setenv("TEST_MESSAGE", report)
+        warning('%s', report);
         test_val = false;
     end
 
@@ -161,14 +135,14 @@ for idx = 1:length(targets)
 end
 disp(' ')
 
-if fail==true
+if fail
     disp('Failed tests: ')
     for idx = 1:length(targets)
         if ~strcmp(messages{idx},"")
             disp(targets{idx})
             disp(['message: ',messages{idx}])
+            error('Failed MATLAB example: %s\n%s', targets{idx}, messages{idx});
         end
     end
-    error('Test failure');
 end
 clearvars

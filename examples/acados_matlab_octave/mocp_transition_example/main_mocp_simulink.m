@@ -3,29 +3,7 @@
 %
 % This file is part of acados.
 %
-% The 2-Clause BSD License
-%
-% Redistribution and use in source and binary forms, with or without
-% modification, are permitted provided that the following conditions are met:
-%
-% 1. Redistributions of source code must retain the above copyright notice,
-% this list of conditions and the following disclaimer.
-%
-% 2. Redistributions in binary form must reproduce the above copyright notice,
-% this list of conditions and the following disclaimer in the documentation
-% and/or other materials provided with the distribution.
-%
-% THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-% AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-% IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-% ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-% LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-% CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-% SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-% INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-% CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-% ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-% POSSIBILITY OF SUCH DAMAGE.;
+% Licensed under the 2-Clause BSD License.
 
 
 settings = get_example_settings();
@@ -36,10 +14,10 @@ n_phases = length(N_list);
 N_horizon = sum(N_list);
 
 % create_multiphase_ocp_solver
-ocp = AcadosMultiphaseOcp(N_list);
+mocp = AcadosMultiphaseOcp(N_list);
 
 phase_1 = formulate_double_integrator_ocp(settings);
-ocp.set_phase(phase_1, 1);
+mocp.set_phase(phase_1, 1);
 
 phase_2 = AcadosOcp();
 phase_2.model = get_transition_model();
@@ -48,7 +26,7 @@ phase_2.cost.cost_type = 'NONLINEAR_LS';
 phase_2.model.cost_y_expr = phase_2.model.x;
 phase_2.cost.W = diag([settings.L2_COST_P, 1e-1 * settings.L2_COST_V]);
 phase_2.cost.yref = zeros(2, 1);
-ocp.set_phase(phase_2, 2);
+mocp.set_phase(phase_2, 2);
 
 phase_3 = formulate_single_integrator_ocp(settings);
 % add dummy constraints to test Simulink
@@ -67,22 +45,22 @@ ubx_all = repmat(phase_3.constraints.ubx, N_3);
 lh_all = repmat(phase_3.constraints.lh, N_3);
 uh_all = repmat(phase_3.constraints.uh, N_3);
 
-ocp.set_phase(phase_3, 3);
+mocp.set_phase(phase_3, 3);
 
 % set mocp specific options
-ocp.mocp_opts.integrator_type = {'ERK', 'DISCRETE', 'ERK'};
+mocp.mocp_opts.integrator_type = {'ERK', 'DISCRETE', 'ERK'};
 
 % set solver options, common for AcadosOcp and AcadosMultiphaseOcp
-ocp.solver_options.nlp_solver_type = 'SQP';
-ocp.solver_options.tf = settings.T_HORIZON + 1.0;
+mocp.solver_options.nlp_solver_type = 'SQP';
+mocp.solver_options.tf = settings.T_HORIZON + 1.0;
 T_HORIZON_1 = 0.4 * settings.T_HORIZON;
 T_HORIZON_2 = settings.T_HORIZON - T_HORIZON_1;
-ocp.solver_options.time_steps = [T_HORIZON_1 / N_list(1) * ones(1, N_list(1)), ...
+mocp.solver_options.time_steps = [T_HORIZON_1 / N_list(1) * ones(1, N_list(1)), ...
                                 1.0, ...  % transition stage
                                 T_HORIZON_2 / N_list(3) * ones(1, N_list(3))];
 
 %% simulink options
-simulink_opts = get_acados_simulink_opts_mocp();
+simulink_opts = AcadosOcpSimulinkOptions('MOCP');
 simulink_opts.inputs.x_init = 1;
 simulink_opts.inputs.u_init = 1;
 simulink_opts.inputs.pi_init = 1;
@@ -98,18 +76,20 @@ simulink_opts.outputs.utraj = 1;
 simulink_opts.outputs.pi_all = 1;
 simulink_opts.outputs.CPU_time = 0;
 
-ocp.simulink_opts = simulink_opts;
+mocp.simulink_opts = simulink_opts;
+
+mocp.name = 'ocp';
 
 x0_original = phase_1.constraints.x0;
 
 tol = 1e-12;
-ocp.solver_options.nlp_solver_tol_stat = tol;
-ocp.solver_options.nlp_solver_tol_eq = tol;
-ocp.solver_options.nlp_solver_tol_ineq = tol;
-ocp.solver_options.nlp_solver_tol_comp = tol;
+mocp.solver_options.nlp_solver_tol_stat = tol;
+mocp.solver_options.nlp_solver_tol_eq = tol;
+mocp.solver_options.nlp_solver_tol_ineq = tol;
+mocp.solver_options.nlp_solver_tol_comp = tol;
 
 %% create solver
-ocp_solver = AcadosOcpSolver(ocp);
+ocp_solver = AcadosOcpSolver(mocp);
 
 %% reference solve
 ocp_solver.solve();
@@ -128,7 +108,7 @@ for i=0:N_horizon-1
     pi_traj = [pi_traj; ocp_solver.get('pi', i)];
 end
 %% simulink test
-cd c_generated_code
+cd(mocp.code_gen_options.code_export_directory);
 make_sfun; % ocp solver
 cd ..;
 n_sim = 3;

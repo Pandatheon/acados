@@ -3,29 +3,7 @@
  *
  * This file is part of acados.
  *
- * The 2-Clause BSD License
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright notice,
- * this list of conditions and the following disclaimer.
- *
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- * this list of conditions and the following disclaimer in the documentation
- * and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.;
+ * Licensed under the 2-Clause BSD License.
  */
 
 #define S_FUNCTION_NAME acados_solver_sfunction_{{ name }}
@@ -40,7 +18,6 @@
 
 // example specific
 #include "acados_solver_{{ name }}.h"
-
 
 {%- if not solver_options.custom_update_filename %}
     {%- set custom_update_filename = "" %}
@@ -147,6 +124,11 @@
   {%- endfor %}
   {%- set ns_max = ns_values | sort | last %}
 {%- endif %}
+
+typedef struct {
+    {{ name }}_solver_capsule *capsule;
+    double* buffer;
+} AcadosOcpData;
 
 
 static void mdlInitializeSizes (SimStruct *S)
@@ -262,7 +244,9 @@ static void mdlInitializeSizes (SimStruct *S)
     {%- set n_inputs = n_inputs + 1 -%}
   {%- endif -%}
 
-  {%- if simulink_opts.inputs.reset_solver -%}  {#- reset_solver #}
+  {%- if simulink_opts.inputs.reset_solver and simulink_opts.inputs.reset_flags %}  {#- reset_solver with reset flags #}
+    {%- set n_inputs = n_inputs + 2 -%}
+  {%- elif simulink_opts.inputs.reset_solver %}  {#- reset_solver #}
     {%- set n_inputs = n_inputs + 1 -%}
   {%- endif -%}
 
@@ -562,7 +546,13 @@ static void mdlInitializeSizes (SimStruct *S)
     ssSetInputPortVectorDimension(S, {{ i_input }}, {{ ns_total }});
   {%- endif %}
 
-  {%- if simulink_opts.inputs.reset_solver -%}  {#- reset_solver #}
+  {%- if simulink_opts.inputs.reset_solver and simulink_opts.inputs.reset_flags %}  {#- reset_solver with reset flags #}
+    {%- set i_input = i_input + 1 %}
+    // reset_solver with additional reset flags
+    ssSetInputPortVectorDimension(S, {{ i_input }}, 1);
+    {%- set i_input = i_input + 1 %}
+    ssSetInputPortVectorDimension(S, {{ i_input }}, 4); // four additional flags: reset_qp_solver, reset_numerical_values, reset_solver_options, reset_x_to_x0_bar
+  {%- elif simulink_opts.inputs.reset_solver %}  {#- reset_solver #}
     {%- set i_input = i_input + 1 %}
     // reset_solver
     ssSetInputPortVectorDimension(S, {{ i_input }}, 1);
@@ -772,26 +762,13 @@ static void mdlInitializeSampleTimes(SimStruct *S)
 
 static void mdlStart(SimStruct *S)
 {
-    {{ name }}_solver_capsule *capsule = {{ name }}_acados_create_capsule();
-    {{ name }}_acados_create(capsule);
+    AcadosOcpData *ocp_data = malloc(sizeof(*ocp_data));
 
-    ssSetUserData(S, (void*)capsule);
-}
+    // capsule
+    ocp_data->capsule = {{ name }}_acados_create_capsule();
+    {{ name }}_acados_create(ocp_data->capsule);
 
-
-static void mdlOutputs(SimStruct *S, int_T tid)
-{
-    {{ name }}_solver_capsule *capsule = ssGetUserData(S);
-    ocp_nlp_config *nlp_config = {{ name }}_acados_get_nlp_config(capsule);
-    ocp_nlp_dims *nlp_dims = {{ name }}_acados_get_nlp_dims(capsule);
-    ocp_nlp_in *nlp_in = {{ name }}_acados_get_nlp_in(capsule);
-    ocp_nlp_out *nlp_out = {{ name }}_acados_get_nlp_out(capsule);
-    ocp_nlp_solver *nlp_solver = {{ name }}_acados_get_nlp_solver(capsule);
-
-    InputRealPtrsType in_sign;
-
-    int N = {{ solver_options.N_horizon }};
-
+    // buffer
     {%- set buffer_sizes = [nx_total, nu_total, dims_0.nbx_0, np_total, dims_0.nbx, dims_e.nbx_e, dims_0.nbu, dims_0.ng, dims_0.nh, dims_0.nh_0, dims_e.ng_e, dims_e.nh_e, ns_total] -%}
 
   {%- if dims_0.ny_0 > 0 and simulink_opts.inputs.y_ref_0 %}  {# y_ref_0 #}
@@ -823,7 +800,29 @@ static void mdlOutputs(SimStruct *S, int_T tid)
 
     // local buffer
     {%- set buffer_size = buffer_sizes | sort | last %}
-    double buffer[{{ buffer_size }}];
+
+    ocp_data->buffer = malloc({{ buffer_size}} * sizeof(double));
+
+    ssSetUserData(S, (void*)ocp_data);
+}
+
+
+static void mdlOutputs(SimStruct *S, int_T tid)
+{
+    AcadosOcpData *ocp_data = ssGetUserData(S);
+    {{ name }}_solver_capsule *capsule = ocp_data->capsule;
+    double* buffer = ocp_data->buffer;
+
+    ocp_nlp_config *nlp_config = {{ name }}_acados_get_nlp_config(capsule);
+    ocp_nlp_dims *nlp_dims = {{ name }}_acados_get_nlp_dims(capsule);
+    ocp_nlp_in *nlp_in = {{ name }}_acados_get_nlp_in(capsule);
+    ocp_nlp_out *nlp_out = {{ name }}_acados_get_nlp_out(capsule);
+    ocp_nlp_solver *nlp_solver = {{ name }}_acados_get_nlp_solver(capsule);
+
+    InputRealPtrsType in_sign;
+
+    int N = {{ solver_options.N_horizon }};
+
     double tmp_double;
     int tmp_offset, tmp_int;
     {#- NOTE: buffer is necessary as ssGetInputPortRealSignalPtrs does not return double pointer #}
@@ -1177,14 +1176,26 @@ static void mdlOutputs(SimStruct *S, int_T tid)
     }
   {%- endif %}
 
-  {%- if simulink_opts.inputs.reset_solver %}  {#- reset_solver #}
+  {%- if simulink_opts.inputs.reset_solver and simulink_opts.inputs.reset_flags %}  {#- reset_solver with additional reset flags#}
+    // reset_solver with additional reset flags
+    {%- set i_input = i_input + 1 %}
+    in_sign = ssGetInputPortRealSignalPtrs(S, {{ i_input }});
+    double reset = (double)(*in_sign[0]);
+
+    {%- set i_input = i_input + 1 %}
+    in_sign = ssGetInputPortRealSignalPtrs(S, {{ i_input }});
+    if (reset)
+    {
+        {{ name }}_acados_reset(capsule, (int) *in_sign[0], (int) *in_sign[1], (int) *in_sign[2], (int) *in_sign[3]);
+    }
+  {%- elif simulink_opts.inputs.reset_solver %}  {#- reset_solver with default flags #}
     // reset_solver
     {%- set i_input = i_input + 1 %}
     in_sign = ssGetInputPortRealSignalPtrs(S, {{ i_input }});
     double reset = (double)(*in_sign[0]);
     if (reset)
     {
-        {{ name }}_acados_reset(capsule, 1);
+        {{ name }}_acados_reset(capsule, 1, 0, 0, 0);
     }
   {%- endif %}
 
@@ -1529,10 +1540,14 @@ static void mdlOutputs(SimStruct *S, int_T tid)
 
 static void mdlTerminate(SimStruct *S)
 {
-    {{ name }}_solver_capsule *capsule = ssGetUserData(S);
+    AcadosOcpData *ocp_data = ssGetUserData(S);
+    {{ name }}_solver_capsule *capsule = ocp_data->capsule;
+    double* buffer = ocp_data->buffer;
 
     {{ name }}_acados_free(capsule);
     {{ name }}_acados_free_capsule(capsule);
+    free(buffer);
+    free(ocp_data);
 }
 
 

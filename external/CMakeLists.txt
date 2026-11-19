@@ -2,30 +2,7 @@
 #
 # This file is part of acados.
 #
-# The 2-Clause BSD License
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#
-# 1. Redistributions of source code must retain the above copyright notice,
-# this list of conditions and the following disclaimer.
-#
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-# this list of conditions and the following disclaimer in the documentation
-# and/or other materials provided with the distribution.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-# POSSIBILITY OF SUCH DAMAGE.;
-#
+# Licensed under the 2-Clause BSD License.
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-error -w")
@@ -87,19 +64,47 @@ if(ACADOS_WITH_DAQP)
 endif()
 
 if(ACADOS_WITH_OSQP)
-    set(PROFILING OFF CACHE BOOL "Turn off profiling in OSQP")
-    set(CTRLC OFF CACHE BOOL "Turn off CTRLC in OSQP")
+    set(OSQP_ENABLE_PROFILING OFF CACHE BOOL "Turn off profiling in OSQP")
+    set(OSQP_ENABLE_INTERRUPT OFF CACHE BOOL "Turn off user interrupt in OSQP")
     add_subdirectory(osqp)
 endif()
 
 
 if(ACADOS_WITH_CLARABEL)
     set(CLARABEL_BUILD_EXAMPLES OFF CACHE BOOL "set Clarabel examples" FORCE)
-    set(CLARABEL_C_OUTPUT_DIR "${CMAKE_INSTALL_PREFIX}/build/external/Clarabel.cpp" CACHE STRING "Set Clarabel.cpp output dir" FORCE)
+    # The Clarabel library is built by cargo and copied to this directory in the build tree,
+    # which exists independently of the install prefix.
+    set(CLARABEL_C_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/Clarabel.cpp" CACHE STRING "Set Clarabel.cpp output dir" FORCE)
     set(PROFILING OFF CACHE BOOL "Turn off profiling in CLARABEL")
     set(CTRLC OFF CACHE BOOL "Turn off CTRLC in CLARABEL")
     add_subdirectory(Clarabel.cpp)
     add_dependencies(acados libclarabel_c_shared)
+
+    # libclarabel_c_shared is part of the exported link interface of acados.
+    # Its include directories (source tree) and library path (build tree) are only valid
+    # when building acados. For the installed export, link against the library installed
+    # to <prefix>/lib. No installed acados header requires clarabel.h.
+    get_target_property(CLARABEL_INCLUDE_DIRS libclarabel_c_shared INTERFACE_INCLUDE_DIRECTORIES)
+    get_target_property(CLARABEL_LINK_LIBS libclarabel_c_shared INTERFACE_LINK_LIBRARIES)
+    set(CLARABEL_INCLUDE_DIRS_EXPORT "")
+    foreach(dir IN LISTS CLARABEL_INCLUDE_DIRS)
+        list(APPEND CLARABEL_INCLUDE_DIRS_EXPORT "$<BUILD_INTERFACE:${dir}>")
+    endforeach()
+    set(CLARABEL_LINK_LIBS_EXPORT "")
+    foreach(lib IN LISTS CLARABEL_LINK_LIBS)
+        string(FIND "${lib}" "${CLARABEL_C_OUTPUT_DIR}/" CLARABEL_LIB_POS)
+        if(CLARABEL_LIB_POS EQUAL 0)
+            get_filename_component(CLARABEL_LIB_NAME "${lib}" NAME)
+            list(APPEND CLARABEL_LINK_LIBS_EXPORT
+                "$<BUILD_INTERFACE:${lib}>"
+                "$<INSTALL_INTERFACE:$<INSTALL_PREFIX>/lib/${CLARABEL_LIB_NAME}>")
+        else()
+            list(APPEND CLARABEL_LINK_LIBS_EXPORT "${lib}")
+        endif()
+    endforeach()
+    set_target_properties(libclarabel_c_shared PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "${CLARABEL_INCLUDE_DIRS_EXPORT}"
+        INTERFACE_LINK_LIBRARIES "${CLARABEL_LINK_LIBS_EXPORT}")
 endif()
 
 if (ACADOS_WITH_OOQP)

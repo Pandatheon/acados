@@ -3,37 +3,13 @@
 #
 # This file is part of acados.
 #
-# The 2-Clause BSD License
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#
-# 1. Redistributions of source code must retain the above copyright notice,
-# this list of conditions and the following disclaimer.
-#
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-# this list of conditions and the following disclaimer in the documentation
-# and/or other materials provided with the distribution.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-# POSSIBILITY OF SUCH DAMAGE.;
-#
+# Licensed under the 2-Clause BSD License.
 
 import os
 from typing import Optional, Union
 import numpy as np
 
-from ctypes import (POINTER, byref, c_char_p, c_double, c_int, c_bool,
-                    c_void_p, cast)
+from ctypes import (POINTER, byref, c_char_p, c_double, c_int, c_void_p, cast)
 if os.name == 'nt':
     from ctypes import wintypes
     from ctypes import WinDLL as DllLoader
@@ -62,15 +38,27 @@ class AcadosOcpQpSolver:
     def N(self) -> int:
         return self.__N
 
+    @property
+    def qp_solver_name(self) -> str:
+        return self.__qp_solver_name
+
+    @property
+    def status(self) -> int:
+        """Return the status of the last solver call."""
+        return self._status
+
     def __init__(self, qp: AcadosOcpQp, opts: Optional[AcadosOcpQpOptions] = None, verbose: bool = False, acados_lib_path: str = None):
 
         self.__solver_created = False
         self.__N = qp.N
         self.qp = qp
+        qp.make_consistent()
         if opts is None:
             opts = AcadosOcpQpOptions()
         opts.make_consistent(qp.N)
-        self.opts = opts
+        self.__qp_solver_name = opts.qp_solver
+        self.opts_fields = opts._supported_fields(opts.qp_solver)
+        self.opts_double_fields = opts._double_fields
 
         # check compatibility of qp and opts
         if 'HPIPM' not in opts.qp_solver:
@@ -79,7 +67,7 @@ class AcadosOcpQpSolver:
         if opts.qp_solver in ['PARTIAL_CONDENSING_HPMPC', 'PARTIAL_CONDENSING_QPDUNES']:
             if qp.has_slacks():
                 raise ValueError(f"Solver {opts.qp_solver} does not support slacks, but QP has slacks.")
-        if opts.qp_solver not in ['PARTIAL_CONDENSING_HPIPM', 'FULL_CONDENSING_HPIPM', 'FULL_CONDENSING_DAQP']:
+        if opts.qp_solver not in ['PARTIAL_CONDENSING_HPIPM', 'FULL_CONDENSING_HPIPM', 'FULL_CONDENSING_DAQP', 'PARTIAL_CONDENSING_OSQP', 'PARTIAL_CONDENSING_CLARABEL', 'FULL_CONDENSING_QPOASES']:
             if qp.has_masks():
                 raise ValueError(f"Solver {opts.qp_solver} does not support masked constraints, but QP has masked constraints.")
 
@@ -153,9 +141,13 @@ class AcadosOcpQpSolver:
         self.__acados_lib.ocp_qp_xcond_solver_get_scalar.argtypes = [c_void_p, c_void_p, c_char_p, c_void_p]
         self.__acados_lib.ocp_qp_xcond_solver_get_scalar.restype = None
 
-        # void ocp_qp_xcond_solver_get_stats(ocp_qp_solver *solver, double* stat)
-        self.__acados_lib.ocp_qp_xcond_solver_get_stats.argtypes = [c_void_p, POINTER(c_double)]
-        self.__acados_lib.ocp_qp_xcond_solver_get_stats.restype = None
+        # void ocp_qp_solver_get_stats(ocp_qp_solver *solver, double* stat)
+        self.__acados_lib.ocp_qp_solver_get_stats.argtypes = [c_void_p, POINTER(c_double), c_char_p]
+        self.__acados_lib.ocp_qp_solver_get_stats.restype = None
+
+        # void ocp_qp_in_dump_to_json(ocp_qp_in *qp_in, const char *json_file)
+        self.__acados_lib.ocp_qp_in_dump_to_json.argtypes = [c_void_p, c_char_p]
+        self.__acados_lib.ocp_qp_in_dump_to_json.restype = None
 
         self.__solver_created = True
         self._status = 0
@@ -210,69 +202,37 @@ class AcadosOcpQpSolver:
         :param field: string - name of the option to set.
         :param value: value of the option to set.
         """
-        fields = ['tol_stat',
-                'tol_eq',
-                'tol_ineq',
-                'tol_comp',
-                'iter_max',
-                'cond_N',
-                'cond_block_size',
-                'warm_start',
-                'cond_ric_alg',
-                'ric_alg',
-                'mu0',
-                't0_init',
-                'print_level',
-                'hpipm_mode'
-                ]
-        if field not in fields:
+        if field not in self.opts_fields:
             raise ValueError(f'AcadosOcpQpSolver.opts_set(field={field}, value={value}): \'{field}\' is an invalid argument.'
-                             f'\n Possible values are {fields}.')
-        if self.__solver_created and field in ['cond_N', 'cond_block_size']:
+                             f'\n Possible values are {self.opts_fields}.')
+        if self.__solver_created and field in ['cond_N', 'cond_block_size', 'hpipm_mode', 'ric_alg']:
             raise RuntimeError(f'AcadosOcpQpSolver.opts_set(field={field}, value={value}): cannot set option \'{field}\' after solver creation.')
         if field == 'cond_block_size':
             value = np.ascontiguousarray(value, dtype=np.intc)
             value_ptr = cast(value.ctypes.data, POINTER(c_int))
-        elif isinstance(value, float):
+        elif field == 'hpipm_mode':
+            value_ptr = value.encode('utf-8')
+        elif field in self.opts_double_fields:
             value_c = c_double(value)
             value_ptr = byref(value_c)
-        elif isinstance(value, int):
+        else:
             value_c = c_int(value)
             value_ptr = byref(value_c)
-        elif isinstance(value, bool):
-            value_c = c_bool(value)
-            value_ptr = byref(value_c)
-        elif isinstance(value, str):
-            value_ptr = value.encode('utf-8')
-        else:
-            raise TypeError(f'AcadosOcpQpSolver.opts_set(field={field}, value={value}): unsupported type {type(value)} for value.')
 
         self.__acados_lib.ocp_qp_xcond_solver_opts_set(self.c_config, self.c_opts, field.encode('utf-8'), value_ptr)
 
     def _set_opts_from_class(self, opts: AcadosOcpQpOptions):
-        if 'HPIPM' in opts.qp_solver:
-            self.opts_set('hpipm_mode', opts.hpipm_mode)
-            self.opts_set('t0_init', opts.t0_init)
-            if opts.mu0 is not None:
-                self.opts_set('mu0', opts.mu0)
-        if opts.qp_solver == "PARTIAL_CONDENSING_HPIPM":
-            self.opts_set('ric_alg', opts.ric_alg)
-        # tols and iter
-        self.opts_set('tol_stat', opts.tol_stat)
-        self.opts_set('tol_eq', opts.tol_eq)
-        self.opts_set('tol_ineq', opts.tol_ineq)
-        self.opts_set('tol_comp', opts.tol_comp)
-        self.opts_set('iter_max', opts.iter_max)
-        # condensing
-        if 'PARTIAL_CONDENSING' in opts.qp_solver:
-            self.opts_set('cond_N', opts.cond_N)
-        if opts.cond_block_size is not None:
-            self.opts_set('cond_block_size', opts.cond_block_size)
-        self.opts_set('cond_ric_alg', opts.cond_ric_alg)
-        # general
-        self.opts_set('warm_start', opts.warm_start)
-        self.opts_set('print_level', opts.print_level)
+        # first set hpipm_mode, as it may override some other options otherwise.
+        if 'hpipm_mode' in self.opts_fields:
+            value = getattr(opts, 'hpipm_mode')
+            self.opts_set('hpipm_mode', value)
 
+        for field in self.opts_fields:
+            if field == 'hpipm_mode':
+                continue
+            value = getattr(opts, field)
+            if value is not None:
+                self.opts_set(field, value)
 
     def _set_initial_qp_data_in_c(self):
         # void ocp_qp_in_set(ocp_qp_xcond_solver_config *config, ocp_qp_in *in, int stage, char *field, void *value)
@@ -335,7 +295,7 @@ class AcadosOcpQpSolver:
         raise NotImplementedError("get_dim_flat() not implemented yet.")
 
 
-    def reset(self, reset_qp_solver_mem=1):
+    def reset(self, reset_qp_solver_mem: bool = True):
         """
         Sets current iterate to all zeros.
         """
@@ -406,10 +366,29 @@ class AcadosOcpQpSolver:
     def set_flat(self, field_: str, value_: np.ndarray) -> None:
         raise NotImplementedError("set_flat() not implemented yet.")
 
+
     def print_statistics(self):
         """
         Print iteration statistics in user freindly format, currently for HPIPM only.
-        The index of each column in the statistics array is as follows:
+        """
+        full_stat = self.get_stats("statistics")
+        print('\niter\tres_stat\tres_eq\t\tres_ineq\tres_comp\tdual_gap\talpha_prim\talpha_dual\tobj')
+        for i in range(full_stat.shape[0]):
+            print(f'{i}\t'
+                f'{full_stat[i, 7]:e}\t'
+                f'{full_stat[i, 8]:e}\t'
+                f'{full_stat[i, 9]:e}\t'
+                f'{full_stat[i, 10]:e}\t'
+                f'{full_stat[i, 6]:e}\t'
+                f'{full_stat[i, 4]:e}\t'
+                f'{full_stat[i, 5]:e}\t'
+                f'{full_stat[i, 12]:e}')
+
+    def get_stats(self, field_: str) -> Union[int, float, np.ndarray]:
+        """
+        Field supports: ['tau_iter', 'time_qp_solver_call', 'time_qp_xcond', 'time_tot', 'iter', 'statistics]
+
+        The index of each column in the statistics array for HPIPM is as follows:
         0: alpha_prim_aff
         1: alpha_dual_aff
         2: mu_aff
@@ -430,25 +409,8 @@ class AcadosOcpQpSolver:
         17: lin res eq
         18: lin res ineq
         19: lin res comp
+        20: singular
         """
-
-        if 'HPIPM' not in self.opts.qp_solver:
-            raise NotImplementedError("print_statistics() is only implemented for HPIPM solver for now.")
-
-        full_stat = self.get_stats("statistics")
-        print('\niter\tres_stat\tres_eq\t\tres_ineq\tres_comp\tdual_gap\talpha_prim\talpha_dual\tobj')
-        for i in range(full_stat.shape[0]):
-            print(f'{i}\t'
-                f'{full_stat[i, 7]:e}\t'
-                f'{full_stat[i, 8]:e}\t'
-                f'{full_stat[i, 9]:e}\t'
-                f'{full_stat[i, 10]:e}\t'
-                f'{full_stat[i, 6]:e}\t'
-                f'{full_stat[i, 4]:e}\t'
-                f'{full_stat[i, 5]:e}\t'
-                f'{full_stat[i, 12]:e}')
-
-    def get_stats(self, field_: str) -> Union[int, float, np.ndarray]:
         int_fields = ['iter']
         double_fields = ['tau_iter', 'time_qp_solver_call', 'time_qp_xcond', 'time_tot']
 
@@ -462,11 +424,18 @@ class AcadosOcpQpSolver:
             self.__acados_lib.ocp_qp_xcond_solver_get_scalar(self.c_solver, self.c_out, field_.encode('utf-8'), byref(value))
             return value.value
         elif field_ == 'statistics':
+            if 'HPIPM' not in self.qp_solver_name:
+                raise NotImplementedError("statistics is only implemented for HPIPM solver for now.")
             iter_qp = self.get_stats('iter')
-            stat_m = 20 # ad-hoc hard code for metric number
-            out = np.zeros((iter_qp+1, stat_m), dtype=np.float64, order="C")
+
+            stat_m = c_int()
+            stat_m_data = byref(stat_m)
+            self.__acados_lib.ocp_qp_xcond_solver_get_scalar(self.c_solver, self.c_out, "stat_m".encode('utf-8'), cast(stat_m_data, c_void_p))
+
+            out = np.zeros((iter_qp+1, stat_m.value), dtype=np.float64, order="C")
             out_data = cast(out.ctypes.data, POINTER(c_double))
-            self.__acados_lib.ocp_qp_xcond_solver_get_stats(self.c_solver, out_data)
+            self.__acados_lib.ocp_qp_solver_get_stats(self.c_solver, out_data, self.qp_solver_name.encode('utf-8'))
+
             return out
         else:
             raise NotImplementedError(f"get_stats() does not support field '{field_}' yet.")
@@ -476,8 +445,6 @@ class AcadosOcpQpSolver:
         """
         Returns the cost value of the current solution.
         """
-        if 'HPIPM' not in self.opts.qp_solver:
-            raise NotImplementedError("get_cost() is only implemented for HPIPM solver for now.")
         full_stat = self.get_stats("statistics")
         cost = full_stat[-1, 12]
         return cost
@@ -488,7 +455,35 @@ class AcadosOcpQpSolver:
 
 
     def set(self, stage_: int, field_: str, value_: np.ndarray):
-        raise NotImplementedError("set() not implemented yet.")
+        """Set supported numerical data in the QP input."""
+        dims = self.qp.dims
+        field_dims = {'lbx': dims.nbx, 'ubx': dims.nbx, 'lbu': dims.nbu, 'ubu': dims.nbu,
+                      'lg': dims.ng, 'ug': dims.ng, 'lls': dims.ns, 'lus': dims.ns,
+                      'lbx_mask': dims.nbx, 'ubx_mask': dims.nbx, 'lbu_mask': dims.nbu, 'ubu_mask': dims.nbu,
+                      'lg_mask': dims.ng, 'ug_mask': dims.ng, 'lls_mask': dims.ns, 'lus_mask': dims.ns}
+        if field_ not in field_dims:
+            raise ValueError(f"AcadosOcpQpSolver.set(stage={stage_}, field={field_}): '{field_}' is an invalid argument."
+                             f"\n Possible values are {list(field_dims.keys())}.")
+
+        if not isinstance(stage_, int):
+            raise TypeError(f'AcadosOcpQpSolver.set(stage={stage_}, field={field_}): stage index must be an integer, got type {type(stage_)}.')
+
+        if stage_ < 0 or stage_ > self.N:
+            raise ValueError(f'AcadosOcpQpSolver.set(stage={stage_}, field={field_}): stage index must be in [0, {self.N}], got: {stage_}.')
+
+        value = np.asarray(value_, dtype=np.float64).reshape(-1)
+        expected_dim = field_dims[field_][stage_]
+        if value.size != expected_dim:
+            raise ValueError(f'AcadosOcpQpSolver.set(stage={stage_}, field={field_}): mismatching dimension; expected {expected_dim}, got {value.size}.')
+
+        value = np.ascontiguousarray(value)
+        self.__acados_lib.ocp_qp_in_set(
+            self.c_config,
+            self.c_in,
+            c_int(stage_),
+            field_.encode('utf-8'),
+            cast(value.ctypes.data, c_void_p),
+        )
 
 
     def get_iterate(self,) -> AcadosOcpIterate:
@@ -501,3 +496,12 @@ class AcadosOcpQpSolver:
             d[field] = traj
         d["z"] = [np.array([]) for _ in range(self.N)]  # z not supported
         return AcadosOcpIterate(**d)
+
+
+    def dump_qp_to_json(self, json_file: str):
+        """
+        Dump the QP input data to a JSON file.
+
+        :param json_file: string - path to the JSON file.
+        """
+        self.__acados_lib.ocp_qp_in_dump_to_json(self.c_in, json_file.encode('utf-8'))

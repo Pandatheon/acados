@@ -3,30 +3,7 @@
 #
 # This file is part of acados.
 #
-# The 2-Clause BSD License
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#
-# 1. Redistributions of source code must retain the above copyright notice,
-# this list of conditions and the following disclaimer.
-#
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-# this list of conditions and the following disclaimer in the documentation
-# and/or other materials provided with the distribution.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-# POSSIBILITY OF SUCH DAMAGE.;
-#
+# Licensed under the 2-Clause BSD License.
 
 import matplotlib.pyplot as plt
 
@@ -34,6 +11,7 @@ from acados_template import AcadosOcp, AcadosOcpSolver, AcadosModel, AcadosSimSo
 import numpy as np
 from casadi import SX, vertcat, diag
 from typing import Tuple
+import os
 
 def plot_crane_trajectories(ts, simX, simU):
 
@@ -99,7 +77,7 @@ def setup_solver_and_integrator(x0: np.ndarray, xf: np.ndarray, N: int, creation
     ocp.cost.cost_type_e = 'EXTERNAL'
 
     ocp.model.cost_expr_ext_cost = dt
-    ocp.model.cost_expr_ext_cost_e = 0
+    ocp.model.cost_expr_ext_cost_e = SX.zeros(1)
 
     ocp.model.cost_expr_ext_cost_custom_hess = diag(vertcat(SX.zeros(1, 1), 1./(dt), SX.zeros(model.x.rows(), 1)))
 
@@ -127,18 +105,20 @@ def setup_solver_and_integrator(x0: np.ndarray, xf: np.ndarray, N: int, creation
     ocp.solver_options.exact_hess_constr = 0
     ocp.solver_options.exact_hess_dyn = 0
 
-    ocp_json_file = 'acados_ocp.json'
+    ocp.code_gen_options.code_export_directory = 'acados_ocp_crane_time_optimal'
+
     if creation_mode == 'cython':
-        AcadosOcpSolver.generate(ocp, json_file=ocp_json_file)
-        AcadosOcpSolver.build(ocp.code_export_directory, with_cython=True)
-        ocp_solver = AcadosOcpSolver.create_cython_solver(ocp_json_file)
+        ocp_solver = AcadosOcpSolver.create_cython_solver(ocp)
     elif creation_mode == 'ctypes_precompiled':
         ## Note: skip generate and build assuming this is done before (in cython run)
-        ocp_solver = AcadosOcpSolver(ocp, json_file=ocp_json_file, build=False, generate=False)
-    elif creation_mode == 'ctypes_precompiled_no_ocp':
-        ocp_solver = AcadosOcpSolver(None, json_file=ocp_json_file, build=False, generate=False)
+        ocp_solver = AcadosOcpSolver(ocp, build=False, generate=False)
+    elif creation_mode == 'ctypes_precompiled_load_ocp':
+
+        ocp.make_consistent() # this sets the path to the json file to the correct default
+        ocp = AcadosOcp.from_json(ocp.code_gen_options.json_file)
+        ocp_solver = AcadosOcpSolver(ocp, build=False, generate=False)
     elif creation_mode == 'ctypes':
-        ocp_solver = AcadosOcpSolver(ocp, json_file=ocp_json_file)
+        ocp_solver = AcadosOcpSolver(ocp)
     else:
         raise Exception(f"Invalid creation mode: {creation_mode}")
 
@@ -156,7 +136,8 @@ def setup_solver_and_integrator(x0: np.ndarray, xf: np.ndarray, N: int, creation
 
     return ocp_solver, integrator
 
-def main(creation_mode=True):
+def main(creation_mode, plot=False):
+    print(f"\nrunning with creation mode {creation_mode}\n")
 
     nu = 2
     nx = 4
@@ -180,12 +161,9 @@ def main(creation_mode=True):
         raise Exception(f'acados returned status {status}.')
 
     # get solution
-    simX = np.zeros((N_horizon+1, nx))
-    simU = np.zeros((N_horizon, nu))
-    for i in range(N_horizon):
-        simX[i,:] = ocp_solver.get(i, "x")
-        simU[i,:] = ocp_solver.get(i, "u")
-    simX[N_horizon,:] = ocp_solver.get(N_horizon, "x")
+    iterate = ocp_solver.get_iterate()
+    simX = np.array(iterate.x)
+    simU = np.array(iterate.u)
 
     dts = simU[:, 1]
 
@@ -231,11 +209,11 @@ def main(creation_mode=True):
 
             k += 1
 
-    plot_crane_trajectories(ts_fine, simX_fine, simU_fine)
+    if plot:
+        plot_crane_trajectories(ts_fine, simX_fine, simU_fine)
 
-CREATION_MODES = ['cython', 'ctypes_precompiled', 'ctypes', 'ctypes_precompiled_no_ocp']
+CREATION_MODES = ['cython', 'ctypes_precompiled', 'ctypes', 'ctypes_precompiled_load_ocp']
 
 if __name__ == "__main__":
-    for creation_mode in ['cython', 'ctypes_precompiled_no_ocp', 'ctypes_precompiled']:
-        main(creation_mode=creation_mode)
-
+    for creation_mode in ['ctypes', 'ctypes_precompiled_load_ocp', 'ctypes_precompiled']:
+        main(creation_mode=creation_mode, plot=False)

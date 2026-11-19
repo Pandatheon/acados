@@ -2,33 +2,13 @@
 #
 # This file is part of acados.
 #
-# The 2-Clause BSD License
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#
-# 1. Redistributions of source code must retain the above copyright notice,
-# this list of conditions and the following disclaimer.
-#
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-# this list of conditions and the following disclaimer in the documentation
-# and/or other materials provided with the distribution.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-# POSSIBILITY OF SUCH DAMAGE.;
+# Licensed under the 2-Clause BSD License.
 
 from dataclasses import dataclass, field
 import numpy as np
 from .acados_dims import AcadosOcpDims
+from .acados_code_gen_options import AcadosCodeGenOptions
+from typing import Optional
 
 
 FEEDBACK_OPTIMIZATION_MODES = ["CONSTANT_FEEDBACK", "RICCATI_CONSTANT_COST", "RICCATI_BARRIER_1", "RICCATI_BARRIER_2"]
@@ -177,7 +157,7 @@ class ZoroDescription:
     nuh_e_t: int = 0
 
 
-    def make_consistent(self, dims: AcadosOcpDims, solver_options=None) -> None:
+    def make_consistent(self, dims: AcadosOcpDims, code_gen_options: Optional[AcadosCodeGenOptions] = None) -> None:
         self.nw, _ = self.W_mat.shape
         if self.unc_jac_G_mat is None:
             self.unc_jac_G_mat = np.eye(self.nw)
@@ -232,8 +212,8 @@ class ZoroDescription:
 
         if self.nonlinear_uncertainty_mode != "NONE":
 
-            if solver_options is None or (not hasattr(solver_options, "sens_forw_p")) or (not solver_options.sens_forw_p):
-                raise Exception(f"nonlinear_uncertainty_mode={self.nonlinear_uncertainty_mode} requires solver_options.sens_forw_p = True ")
+            if code_gen_options is None or (not hasattr(code_gen_options, "sens_forw_p")) or (not code_gen_options.sens_forw_p):
+                raise Exception(f"nonlinear_uncertainty_mode={self.nonlinear_uncertainty_mode} requires code_gen_options.sens_forw_p = True ")
 
             if dims.np is None or dims.np <= 0:
                 raise Exception("nonlinear_uncertainty_mode is enabled but dims.np <= 0. Please ensure parameters are defined in the OCP model.")

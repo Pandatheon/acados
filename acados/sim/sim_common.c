@@ -3,29 +3,7 @@
  *
  * This file is part of acados.
  *
- * The 2-Clause BSD License
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright notice,
- * this list of conditions and the following disclaimer.
- *
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- * this list of conditions and the following disclaimer in the documentation
- * and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.;
+ * Licensed under the 2-Clause BSD License.
  */
 
 
@@ -264,6 +242,21 @@ int sim_in_set_(void *config_, void *dims_, sim_in *in, const char *field, void 
 }
 
 
+void sim_in_get_(sim_in *in, const char *field, void *value)
+{
+    if (!strcmp(field, "T"))
+    {
+        double *T = value;
+        T[0] = in->T;
+    }
+    else
+    {
+        printf("\nsim_in_get_ does not support field %s.\n\n", field);
+        exit(1);
+    }
+}
+
+
 
 /************************************************
  * out
@@ -454,6 +447,54 @@ int sim_out_get_(void *config_, void *dims_, sim_out *out, const char *field, vo
 /************************************************
 * sim_opts
 ************************************************/
+
+acados_size_t sim_opts_calculate_size(void *config_, void *dims)
+{
+    int ns_max = NS_MAX;
+
+    acados_size_t size = 0;
+
+    size += sizeof(sim_opts);
+
+    size += ns_max * ns_max * sizeof(double);  // A_mat
+    size += ns_max * sizeof(double);           // b_vec
+    size += ns_max * sizeof(double);           // c_vec
+
+    size += butcher_tableau_work_calculate_size(ns_max);  // work
+
+    make_int_multiple_of(8, &size);
+    size += 1 * 8;
+
+    return size;
+}
+
+
+
+void *sim_opts_assign(void *config_, void *dims, void *raw_memory)
+{
+    int ns_max = NS_MAX;
+
+    char *c_ptr = (char *) raw_memory;
+
+    sim_opts *opts = (sim_opts *) c_ptr;
+    c_ptr += sizeof(sim_opts);
+
+    align_char_to(8, &c_ptr);
+
+    // work
+    opts->work = c_ptr;
+    c_ptr += butcher_tableau_work_calculate_size(ns_max);
+
+    assign_and_advance_double(ns_max * ns_max, &opts->A_mat, &c_ptr);
+    assign_and_advance_double(ns_max, &opts->b_vec, &c_ptr);
+    assign_and_advance_double(ns_max, &opts->c_vec, &c_ptr);
+
+    assert((char *) raw_memory + sim_opts_calculate_size(config_, dims) >= c_ptr);
+
+    return (void *) opts;
+}
+
+
 
 void sim_opts_set_(sim_opts *opts, const char *field, void *value)
 {

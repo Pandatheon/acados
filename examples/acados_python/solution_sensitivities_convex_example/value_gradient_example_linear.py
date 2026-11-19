@@ -3,46 +3,23 @@
 #
 # This file is part of acados.
 #
-# The 2-Clause BSD License
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#
-# 1. Redistributions of source code must retain the above copyright notice,
-# this list of conditions and the following disclaimer.
-#
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-# this list of conditions and the following disclaimer in the documentation
-# and/or other materials provided with the distribution.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-# POSSIBILITY OF SUCH DAMAGE.;
-#
+# Licensed under the 2-Clause BSD License.
 
 import sys
 sys.path.insert(0, '../pendulum_on_cart/solution_sensitivities')
 import numpy as np
 from sensitivity_utils import plot_cost_gradient_results
 from acados_template import AcadosOcpSolver
-from setup_parametric_ocp import PARAM_VALUE_DICT, export_parametric_ocp
+from setup_parametric_ocp import get_default_param_values, export_parametric_ocp
 
 
-def main():
+def main(nx: int, nu: int, x0: np.ndarray):
 
     learnable_params = ["A", "Q", "b"]
-    x0 = np.array([0.1, -0.2])
 
     delta_p = 0.005
-    p_nominal = np.concatenate([PARAM_VALUE_DICT[k].flatten() for k in learnable_params]).flatten()
+    param = get_default_param_values(nx, nu)
+    p_nominal = np.concatenate([param[k].flatten() for k in learnable_params]).flatten()
 
     p_test = np.arange(0.0, 1.0, delta_p)
     np_test = p_test.shape[0]
@@ -57,7 +34,7 @@ def main():
     dp[8] = -0.2
     dp[9] = -0.2
 
-    ocp = export_parametric_ocp(PARAM_VALUE_DICT, learnable_params = learnable_params)
+    ocp = export_parametric_ocp(nx, nu, learnable_params=learnable_params)
     ocp.solver_options.with_value_sens_wrt_params = True
     acados_ocp_solver = AcadosOcpSolver(ocp)
 
@@ -95,4 +72,6 @@ def main():
     assert median_diff <= test_tol
 
 if __name__ == "__main__":
-    main()
+    nx, nu = 2, 1
+    x0 = 0.1 * (-1) ** np.arange(nx)
+    main(nx, nu, x0)

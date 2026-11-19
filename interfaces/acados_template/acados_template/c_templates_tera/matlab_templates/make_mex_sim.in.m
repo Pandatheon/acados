@@ -3,33 +3,11 @@
 %
 % This file is part of acados.
 %
-% The 2-Clause BSD License
-%
-% Redistribution and use in source and binary forms, with or without
-% modification, are permitted provided that the following conditions are met:
-%
-% 1. Redistributions of source code must retain the above copyright notice,
-% this list of conditions and the following disclaimer.
-%
-% 2. Redistributions in binary form must reproduce the above copyright notice,
-% this list of conditions and the following disclaimer in the documentation
-% and/or other materials provided with the distribution.
-%
-% THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-% AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-% IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-% ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-% LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-% CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-% SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-% INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-% CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-% ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-% POSSIBILITY OF SUCH DAMAGE.;
+% Licensed under the 2-Clause BSD License.
 
 %
 
-function make_mex_sim_{{ model.name }}()
+function make_mex_sim_{{ name }}()
 
     opts.output_dir = pwd;
 
@@ -38,13 +16,13 @@ function make_mex_sim_{{ model.name }}()
 
     % set paths
     acados_include = ['-I' fullfile(acados_folder, 'include')];
-    template_lib_include = ['-l' 'acados_sim_solver_{{ model.name }}'];
+    template_lib_include = ['-l' 'acados_sim_solver_{{ name }}'];
     template_lib_path = ['-L' fullfile(pwd)];
 
-    acados_link_str = ['-L' '{{ code_gen_opts.acados_lib_path }}'];
-    external_include = ['-I', fullfile(acados_folder, 'external')];
-    blasfeo_include = ['-I', fullfile(acados_folder, 'external', 'blasfeo', 'include')];
-    hpipm_include = ['-I', fullfile(acados_folder, 'external', 'hpipm', 'include')];
+    acados_link_str = ['-L' '{{ code_gen_options.acados_lib_path }}'];
+    external_include = ['-I', fullfile(acados_folder,'include')];
+    blasfeo_include = ['-I', fullfile(acados_folder,'include', 'blasfeo', 'include')];
+    hpipm_include = ['-I', fullfile(acados_folder,'include', 'hpipm', 'include')];
 
     % load linking information of compiled acados
     link_libs_core_filename = fullfile(acados_folder, 'lib', 'link_libs.json');
@@ -67,13 +45,12 @@ function make_mex_sim_{{ model.name }}()
         end
     end
 
-
     mex_include = ['-I', fullfile(acados_folder, 'interfaces', 'acados_matlab_octave')];
 
     mex_names = { ...
-        'acados_sim_create_{{ model.name }}', ...
-        'acados_sim_free_{{ model.name }}', ...
-        'acados_sim_set_{{ model.name }}' ...
+        'acados_sim_create_{{ name }}', ...
+        'acados_sim_free_{{ name }}', ...
+        'acados_sim_set_{{ name }}' ...
     };
 
     mex_files = cell(length(mex_names), 1);
@@ -135,6 +112,4 @@ function make_mex_sim_{{ model.name }}()
                 acados_lib_extra{:}, mex_files{ii})
         end
     end
-
-
 end

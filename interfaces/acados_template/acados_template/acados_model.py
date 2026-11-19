@@ -3,41 +3,16 @@
 #
 # This file is part of acados.
 #
-# The 2-Clause BSD License
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#
-# 1. Redistributions of source code must retain the above copyright notice,
-# this list of conditions and the following disclaimer.
-#
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-# this list of conditions and the following disclaimer in the documentation
-# and/or other materials provided with the distribution.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-# POSSIBILITY OF SUCH DAMAGE.;
-#
+# Licensed under the 2-Clause BSD License.
 
 from typing import Union, Tuple, List
 import inspect, warnings
 
 import casadi as ca
 import numpy as np
-from deprecated.sphinx import deprecated
-
 from casadi import MX, SX
 
-from .utils import is_empty, casadi_length
+from .utils import is_empty, casadi_length, only_depends
 from .acados_dims import AcadosOcpDims, AcadosSimDims
 
 
@@ -47,10 +22,12 @@ class AcadosModel():
     that are needed when creating an acados ocp solver or acados integrator.
     Thus, this class contains:
 
-    a) the :py:attr:`name` of the model,
+    a) the model :py:attr:`name`,
     b) all CasADi variables/expressions needed in the CasADi function generation process.
     """
     def __init__(self):
+
+        self.__non_expression_properties = ["name", "dyn_ext_fun_type", "dyn_generic_source", "gnsf_model", "nu_original", "t0", "x_labels", "u_labels", "t_label"]
         ## common for OCP and Integrator
         self.__name = None
         self.__x = []
@@ -65,6 +42,7 @@ class AcadosModel():
         ## dynamics
         self.__f_impl_expr = []
         self.__f_expl_expr = []
+        self.__f_expl_expr_with_cost = []
 
         self.__disc_dyn_expr = []
         self.__disc_dyn_custom_jac_ux_expr = []
@@ -118,6 +96,19 @@ class AcadosModel():
         self.__cost_expr_ext_cost_custom_hess_e = []
         self.__cost_expr_ext_cost_custom_hess_0 = []
 
+        self.__cost_zl_expr = []
+        self.__cost_zu_expr = []
+        self.__cost_Zl_expr = []
+        self.__cost_Zu_expr = []
+        self.__cost_zl_expr_0 = []
+        self.__cost_zu_expr_0 = []
+        self.__cost_Zl_expr_0 = []
+        self.__cost_Zu_expr_0 = []
+        self.__cost_zl_expr_e = []
+        self.__cost_zu_expr_e = []
+        self.__cost_Zl_expr_e = []
+        self.__cost_Zu_expr_e = []
+
         ## CONVEX_OVER_NONLINEAR convex-over-nonlinear cost: psi(y(x, u, p) - y_ref; p)
         self.__cost_psi_expr_0 = []
         self.__cost_psi_expr = []
@@ -144,6 +135,8 @@ class AcadosModel():
 
     @name.setter
     def name(self, name):
+        if not isinstance(name, str):
+            raise TypeError(f"AcadosModel.name should be str, got {type(name)}.")
         self.__name = name
 
     @property
@@ -271,6 +264,21 @@ class AcadosModel():
     @f_expl_expr.setter
     def f_expl_expr(self, f_expl_expr):
         self.__f_expl_expr = f_expl_expr
+
+
+    @property
+    def f_expl_expr_with_cost(self):
+        r"""
+        CasADi expression for explicit dynamics augmented with cost_state :math:`[\dot{x}, \dot{c}] = f_\text{expl, wc}(x, u, p)`.
+        Used if :py:attr:`acados_template.acados_ocp_options.AcadosOcpOptions.integrator_type` == 'ERK_WITH_COST'.
+        Default: :code:`[]`
+        """
+        return self.__f_expl_expr_with_cost
+
+    @f_expl_expr_with_cost.setter
+    def f_expl_expr_with_cost(self, f_expl_expr_with_cost):
+        self.__f_expl_expr_with_cost = f_expl_expr_with_cost
+
 
     @property
     def disc_dyn_expr(self):
@@ -641,6 +649,122 @@ class AcadosModel():
     def cost_expr_ext_cost_0(self, cost_expr_ext_cost_0):
         self.__cost_expr_ext_cost_0 = cost_expr_ext_cost_0
 
+    @property
+    def cost_zl_expr(self):
+        """CasADi expression for the lower slack gradient at intermediate stages."""
+        return self.__cost_zl_expr
+
+    @cost_zl_expr.setter
+    def cost_zl_expr(self, value):
+        self.__cost_zl_expr = value
+
+    @property
+    def cost_zu_expr(self):
+        """CasADi expression for the upper slack gradient at intermediate stages."""
+        return self.__cost_zu_expr
+
+    @cost_zu_expr.setter
+    def cost_zu_expr(self, value):
+        self.__cost_zu_expr = value
+
+    @property
+    def cost_Zl_expr(self):
+        """CasADi expression for the lower slack Hessian diagonal at intermediate stages."""
+        return self.__cost_Zl_expr
+
+    @cost_Zl_expr.setter
+    def cost_Zl_expr(self, value):
+        self.__cost_Zl_expr = value
+
+    @property
+    def cost_Zu_expr(self):
+        """CasADi expression for the upper slack Hessian diagonal at intermediate stages."""
+        return self.__cost_Zu_expr
+
+    @cost_Zu_expr.setter
+    def cost_Zu_expr(self, value):
+        self.__cost_Zu_expr = value
+
+    @property
+    def cost_zl_expr_0(self):
+        """CasADi expression for the lower slack gradient at the initial stage."""
+        return self.__cost_zl_expr_0
+
+    @cost_zl_expr_0.setter
+    def cost_zl_expr_0(self, value):
+        self.__cost_zl_expr_0 = value
+
+    @property
+    def cost_zu_expr_0(self):
+        """CasADi expression for the upper slack gradient at the initial stage."""
+        return self.__cost_zu_expr_0
+
+    @cost_zu_expr_0.setter
+    def cost_zu_expr_0(self, value):
+        self.__cost_zu_expr_0 = value
+
+    @property
+    def cost_Zl_expr_0(self):
+        """CasADi expression for the lower slack Hessian diagonal at the initial stage."""
+        return self.__cost_Zl_expr_0
+
+    @cost_Zl_expr_0.setter
+    def cost_Zl_expr_0(self, value):
+        self.__cost_Zl_expr_0 = value
+
+    @property
+    def cost_Zu_expr_0(self):
+        """CasADi expression for the upper slack Hessian diagonal at the initial stage."""
+        return self.__cost_Zu_expr_0
+
+    @cost_Zu_expr_0.setter
+    def cost_Zu_expr_0(self, value):
+        self.__cost_Zu_expr_0 = value
+
+    @property
+    def cost_zl_expr_e(self):
+        """CasADi expression for the lower slack gradient at the terminal stage."""
+        return self.__cost_zl_expr_e
+
+    @cost_zl_expr_e.setter
+    def cost_zl_expr_e(self, value):
+        self.__cost_zl_expr_e = value
+
+    @property
+    def cost_zu_expr_e(self):
+        """CasADi expression for the upper slack gradient at the terminal stage."""
+        return self.__cost_zu_expr_e
+
+    @cost_zu_expr_e.setter
+    def cost_zu_expr_e(self, value):
+        self.__cost_zu_expr_e = value
+
+    @property
+    def cost_Zl_expr_e(self):
+        """CasADi expression for the lower slack Hessian diagonal at the terminal stage."""
+        return self.__cost_Zl_expr_e
+
+    @cost_Zl_expr_e.setter
+    def cost_Zl_expr_e(self, value):
+        self.__cost_Zl_expr_e = value
+
+    @property
+    def cost_Zu_expr_e(self):
+        """CasADi expression for the upper slack Hessian diagonal at the terminal stage."""
+        return self.__cost_Zu_expr_e
+
+    @cost_Zu_expr_e.setter
+    def cost_Zu_expr_e(self, value):
+        self.__cost_Zu_expr_e = value
+
+    @property
+    def has_slack_cost_expr(self):
+        return {
+            stage: all(not is_empty(getattr(self, f'cost_{field}_expr{suffix}'))
+                       for field in ('zl', 'zu', 'Zl', 'Zu'))
+            for stage, suffix in (('initial', '_0'), ('path', ''), ('terminal', '_e'))
+        }
+
 
     @property
     def cost_expr_ext_cost_custom_hess(self):
@@ -826,7 +950,7 @@ class AcadosModel():
     def x_labels(self):
         """Contains list of labels for the states. Default: :code:`None`"""
         if self.__x_labels is None:
-            return [f"x{i}" for i in range(self.x.size()[0])]
+            return [f"x{i}" for i in range(self.x.size()[0])] if not is_empty(self.x) else []
         else:
             return self.__x_labels
 
@@ -839,7 +963,7 @@ class AcadosModel():
     def u_labels(self):
         """Contains list of labels for the controls. Default: :code:`None`"""
         if self.__u_labels is None:
-            return [f"u{i}" for i in range(self.u.size()[0])]
+            return [f"u{i}" for i in range(self.u.size()[0])] if not is_empty(self.u) else []
         else:
             return self.__u_labels
 
@@ -875,6 +999,9 @@ class AcadosModel():
 
 
     def make_consistent(self, dims: Union[AcadosOcpDims, AcadosSimDims]) -> None:
+
+        if self.name is None:
+            raise ValueError("Please set AcadosModel.name, got None.")
 
         casadi_symbol = self.get_casadi_symbol()
 
@@ -941,6 +1068,20 @@ class AcadosModel():
             if any(ca.which_depends(self.p_global, self.p)):
                 raise ValueError(f"model.p_global must not depend on model.p, got p_global ={self.p_global}, p = {self.p}")
 
+        slack_cost_fields = (
+            "cost_zl_expr", "cost_zu_expr", "cost_Zl_expr", "cost_Zu_expr",
+            "cost_zl_expr_0", "cost_zu_expr_0", "cost_Zl_expr_0", "cost_Zu_expr_0",
+            "cost_zl_expr_e", "cost_zu_expr_e", "cost_Zl_expr_e", "cost_Zu_expr_e",
+        )
+        for field in slack_cost_fields:
+            expr = getattr(self, field)
+            if is_empty(expr):
+                continue
+            if not isinstance(expr, (ca.SX, ca.MX)):
+                raise TypeError(f"model.{field} must be a CasADi SX or MX expression, got {type(expr)}")
+            if not only_depends(expr, self.p_global):
+                raise ValueError(f"model.{field} may only depend on model.p_global")
+
         # check f_impl, f_expl
         if not is_empty(self.f_impl_expr):
             if casadi_length(self.f_impl_expr) != (dims.nx + dims.nz):
@@ -949,6 +1090,9 @@ class AcadosModel():
             if casadi_length(self.f_expl_expr) != dims.nx:
                 raise ValueError(f"model.f_expl_expr must have length nx = {dims.nx}, got {casadi_length(self.f_expl_expr)}")
 
+        if not is_empty(self.f_expl_expr_with_cost):
+            if casadi_length(self.f_expl_expr_with_cost) != dims.nx + 1:
+                raise ValueError(f"model.f_expl_expr_with_cost must have length nx+1 = {dims.nx+1}, got {casadi_length(self.f_expl_expr_with_cost)}")
         return
 
 
@@ -1016,6 +1160,31 @@ class AcadosModel():
                     is_empty(self.cost_expr_ext_cost_custom_hess_e))
 
 
+    def reformulate_with_parameter_as_state(self, use_p_global: bool = False):
+        """Augment the model with the parameters as additional states."""
+
+        if use_p_global:
+            param = self.p_global
+            self.p_global = []
+        else:
+            param = self.p
+            self.p = []
+
+        nparam = param.rows()
+        self.x = ca.vertcat(self.x, param)
+
+        if not is_empty(self.f_expl_expr):
+            self.f_expl_expr = ca.vertcat(self.f_expl_expr, ca.SX.zeros((nparam)))
+
+        if not is_empty(self.f_impl_expr):
+            pdot = ca.SX.sym("pdot", nparam)
+            self.f_impl_expr = ca.vertcat(self.f_impl_expr, pdot)
+            self.xdot = ca.vertcat(self.xdot, pdot)
+
+        if not is_empty(self.disc_dyn_expr):
+            self.disc_dyn_expr = ca.vertcat(self.disc_dyn_expr, param)
+
+
     def serialize(self) -> Tuple[str, List[str]]:
         """
         Serialize the CasADi expressions.
@@ -1055,7 +1224,8 @@ class AcadosModel():
         for k, _ in inspect.getmembers(type(self), lambda v: isinstance(v, property)):
             v = getattr(self, k)
             if isinstance(v, (ca.SX, ca.MX)):
-                model_dict[k] = repr(v) # only for debugging
+                pass
+                # model_dict[k] = repr(v) # only for debugging, but this does break comparison of loaded objects.
             elif isinstance(v, GnsfModel):
                 model_dict[k] = v.to_dict()
             else:
@@ -1076,7 +1246,7 @@ class AcadosModel():
 
         model = cls()
 
-        expression_names =  model_dict.get('expression_names')
+        expression_names = model_dict.get('expression_names')
         serialized_expressions = model_dict.get('serialized_expressions')
 
         if expression_names is None or serialized_expressions is None:
@@ -1085,21 +1255,26 @@ class AcadosModel():
         # loop over all properties
         for attr, _ in inspect.getmembers(type(model), lambda v: isinstance(v, property)):
 
+            if attr == 'has_slack_cost_expr':
+                continue
+
             value = model_dict.get(attr)
 
+            if attr == 'gnsf_model' and value is not None:
+                try:
+                    gnsf_model = GnsfModel.from_dict(value)
+                    setattr(model, attr, gnsf_model)
+                except Exception as e:
+                    print("Failed to load gnsf_model from dictionary. If formulation objects are exchanged between MATLAB/Octave and Python, this is a known issue, not loading gnsf_model.\n Got error:\n" + repr(e))
             # expressions are expected to be None
-            if value is None and attr not in expression_names:
+            elif value is None and attr in model.__non_expression_properties:
                 warnings.warn(f"Attribute {attr} not in dictionary.")
             else:
                 try:
-                    # check whether value is not the empty list and not a CasADi symbol/expression
-                    if attr == 'gnsf_model' and value is not None:
-                        gnsf_model = GnsfModel.from_dict(value)
-                        setattr(model, attr, gnsf_model)
                     if not (isinstance(value, list) and not value) and not attr in expression_names:
                         setattr(model, attr, value)
                 except Exception as e:
-                    Exception("Failed to load attribute {attr} from dictionary:\n" + repr(e))
+                    Exception(f"Failed to load attribute {attr} from dictionary:\n" + repr(e))
 
         model.deserialize(model_dict['serialized_expressions'], model_dict['expression_names'])
 

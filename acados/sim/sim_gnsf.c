@@ -3,29 +3,7 @@
  *
  * This file is part of acados.
  *
- * The 2-Clause BSD License
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright notice,
- * this list of conditions and the following disclaimer.
- *
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- * this list of conditions and the following disclaimer in the documentation
- * and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.;
+ * Licensed under the 2-Clause BSD License.
  */
 
 
@@ -260,53 +238,6 @@ static void sim_gnsf_import_matrices(void *dims_, gnsf_model *model)
 /************************************************
  * opts
  ************************************************/
-
-acados_size_t sim_gnsf_opts_calculate_size(void *config_, void *dims)
-{
-    int ns_max = NS_MAX;
-
-    acados_size_t size = 0;
-
-    size += sizeof(sim_opts);
-
-    size += ns_max * ns_max * sizeof(double);  // A_mat
-    size += ns_max * sizeof(double);           // b_vec
-    size += ns_max * sizeof(double);           // c_vec
-
-    size += butcher_tableau_work_calculate_size(ns_max);
-
-    make_int_multiple_of(8, &size);
-    size += 1 * 8;
-
-    return size;
-}
-
-
-void *sim_gnsf_opts_assign(void *config_, void *dims, void *raw_memory)
-{
-    int ns_max = NS_MAX;
-
-    char *c_ptr = (char *) raw_memory;
-
-    sim_opts *opts = (sim_opts *) c_ptr;
-    c_ptr += sizeof(sim_opts);
-
-    align_char_to(8, &c_ptr);
-
-    assign_and_advance_double(ns_max * ns_max, &opts->A_mat, &c_ptr);
-    assign_and_advance_double(ns_max, &opts->b_vec, &c_ptr);
-    assign_and_advance_double(ns_max, &opts->c_vec, &c_ptr);
-
-    // work
-    opts->work = c_ptr;
-    c_ptr += butcher_tableau_work_calculate_size(ns_max);;
-
-    assert((char *) raw_memory + sim_gnsf_opts_calculate_size(config_, dims) >= c_ptr);
-
-    return (void *) opts;
-}
-
-
 
 void sim_gnsf_opts_initialize_default(void *config_, void *dims_, void *opts_)
 {
@@ -863,21 +794,21 @@ int sim_gnsf_precompute(void *config_, sim_in *in, sim_out *out, void *opts_, vo
     // SOLVE EE1 \ DD1, ... EE1 \ AA1;
     blasfeo_dgetrf_rp(nK1, nK1, &EE1, 0, 0, &EE1, 0, 0, ipivEE1);  // factorize EE1
 
-    blasfeo_drowpe(nK1, ipivEE1, &AA1);  // permute also rhs
+    blasfeo_drowpe(nK1, ipivEE1, nx1, &AA1, 0, 0);  // permute also rhs
     blasfeo_dtrsm_llnu(nK1, nx1, 1.0, &EE1, 0, 0, &AA1, 0, 0, &AA1, 0, 0);
     blasfeo_dtrsm_lunn(nK1, nx1, 1.0, &EE1, 0, 0, &AA1, 0, 0, &AA1, 0,
                        0);              // AA1 now contains EE1\AA1
-    blasfeo_drowpe(nK1, ipivEE1, &BB1);  // permute also rhs
+    blasfeo_drowpe(nK1, ipivEE1, nu, &BB1, 0, 0);  // permute also rhs
     blasfeo_dtrsm_llnu(nK1, nu, 1.0, &EE1, 0, 0, &BB1, 0, 0, &BB1, 0, 0);
     blasfeo_dtrsm_lunn(nK1, nu, 1.0, &EE1, 0, 0, &BB1, 0, 0, &BB1, 0,
                        0);               // BB1 now contains EE1\BB1
-    blasfeo_drowpe(nK1, ipivEE1, &CC1);  // permute also rhs
+    blasfeo_drowpe(nK1, ipivEE1, nvv, &CC1, 0, 0);  // permute also rhs
 
     blasfeo_dtrsm_llnu(nK1, nvv, 1.0, &EE1, 0, 0, &CC1, 0, 0, &CC1, 0, 0);
     blasfeo_dtrsm_lunn(nK1, nvv, 1.0, &EE1, 0, 0, &CC1, 0, 0, &CC1, 0,
                        0);               // CC1 now contains EE1\CC1
 
-    blasfeo_drowpe(nK1, ipivEE1, &DD1);  // permute also rhs
+    blasfeo_drowpe(nK1, ipivEE1, nZ1, &DD1, 0, 0);  // permute also rhs
     blasfeo_dtrsm_llnu(nK1, nZ1, 1.0, &EE1, 0, 0, &DD1, 0, 0, &DD1, 0, 0);
     blasfeo_dtrsm_lunn(nK1, nZ1, 1.0, &EE1, 0, 0, &DD1, 0, 0, &DD1, 0,
                        0);  // DD1 now contains EE1\DD1
@@ -893,22 +824,22 @@ int sim_gnsf_precompute(void *config_, sim_in *in, sim_out *out, void *opts_, vo
     // SOLVE EE2 \ DD2, ... EE2 \ AA2;
     blasfeo_dgetrf_rp(nZ1, nZ1, &EE2, 0, 0, &EE2, 0, 0, ipivEE2);  // factorize EE2
 
-    blasfeo_drowpe(nZ1, ipivEE2, &AA2);  // permute also rhs
+    blasfeo_drowpe(nZ1, ipivEE2, nx1, &AA2, 0, 0);  // permute also rhs
     blasfeo_dtrsm_llnu(nZ1, nx1, 1.0, &EE2, 0, 0, &AA2, 0, 0, &AA2, 0, 0);
     blasfeo_dtrsm_lunn(nZ1, nx1, 1.0, &EE2, 0, 0, &AA2, 0, 0, &AA2, 0, 0);
                                     // AA2 now contains EE2\AA2
 
-    blasfeo_drowpe(nZ1, ipivEE2, &BB2);  // permute also rhs
+    blasfeo_drowpe(nZ1, ipivEE2, nu, &BB2, 0, 0);  // permute also rhs
     blasfeo_dtrsm_llnu(nZ1, nu, 1.0, &EE2, 0, 0, &BB2, 0, 0, &BB2, 0, 0);
     blasfeo_dtrsm_lunn(nZ1, nu, 1.0, &EE2, 0, 0, &BB2, 0, 0, &BB2, 0, 0);
                                     // BB2 now contains EE2\BB2
 
-    blasfeo_drowpe(nZ1, ipivEE2, &CC2);  // permute also rhs
+    blasfeo_drowpe(nZ1, ipivEE2, nvv, &CC2, 0, 0);  // permute also rhs
     blasfeo_dtrsm_llnu(nZ1, nvv, 1.0, &EE2, 0, 0, &CC2, 0, 0, &CC2, 0, 0);
     blasfeo_dtrsm_lunn(nZ1, nvv, 1.0, &EE2, 0, 0, &CC2, 0, 0, &CC2, 0, 0);
                                     // CC2 now contains EE2\CC2
 
-    blasfeo_drowpe(nZ1, ipivEE2, &DD2);  // permute also rhs
+    blasfeo_drowpe(nZ1, ipivEE2, nK1, &DD2, 0, 0);  // permute also rhs
     blasfeo_dtrsm_llnu(nZ1, nK1, 1.0, &EE2, 0, 0, &DD2, 0, 0, &DD2, 0, 0);
     blasfeo_dtrsm_lunn(nZ1, nK1, 1.0, &EE2, 0, 0, &DD2, 0, 0, &DD2, 0, 0);
                                     // DD2 now contains EE2\DD2
@@ -929,7 +860,7 @@ int sim_gnsf_precompute(void *config_, sim_in *in, sim_out *out, void *opts_, vo
                      0);                                  // ZZv = DD2 * CC1
     blasfeo_dgead(nZ1, nvv, 1.0, &CC2, 0, 0, ZZv, 0, 0);  // ZZv = ZZv + CC2;
     // solve QQ1\ZZv and store result in ZZv;
-    blasfeo_drowpe(nZ1, ipivQQ1, ZZv);  // permute also rhs
+    blasfeo_drowpe(nZ1, ipivQQ1, nvv, ZZv, 0, 0);  // permute also rhs
     blasfeo_dtrsm_llnu(nZ1, nvv, 1.0, &QQ1, 0, 0, ZZv, 0, 0, ZZv, 0, 0);
     blasfeo_dtrsm_lunn(nZ1, nvv, 1.0, &QQ1, 0, 0, ZZv, 0, 0, ZZv, 0,
                        0);  // ZZv now contains QQ1\ZZv
@@ -939,7 +870,7 @@ int sim_gnsf_precompute(void *config_, sim_in *in, sim_out *out, void *opts_, vo
                      0);                                 // ZZu = DD2 * BB1
     blasfeo_dgead(nZ1, nu, 1.0, &BB2, 0, 0, ZZu, 0, 0);  // ZZu = ZZu + BB2;
     // solve QQ1\ZZu and store result in ZZu;
-    blasfeo_drowpe(nZ1, ipivQQ1, ZZu);  // permute also rhs
+    blasfeo_drowpe(nZ1, ipivQQ1, nu, ZZu, 0, 0);  // permute also rhs
     blasfeo_dtrsm_llnu(nZ1, nu, 1.0, &QQ1, 0, 0, ZZu, 0, 0, ZZu, 0, 0);
     blasfeo_dtrsm_lunn(nZ1, nu, 1.0, &QQ1, 0, 0, ZZu, 0, 0, ZZu, 0,
                        0);  // ZZu now contains QQ1\ZZu
@@ -950,7 +881,7 @@ int sim_gnsf_precompute(void *config_, sim_in *in, sim_out *out, void *opts_, vo
     blasfeo_dgead(nZ1, nx1, 1.0, &AA2, 0, 0, ZZx, 0, 0);  // ZZx = ZZx + AA2;
 
     // solve QQ1\ZZx and store result in ZZx;
-    blasfeo_drowpe(nZ1, ipivQQ1, ZZu);  // permute also rhs
+    blasfeo_drowpe(nZ1, ipivQQ1, nx1, ZZx, 0, 0);  // permute also rhs
     blasfeo_dtrsm_llnu(nZ1, nx1, 1.0, &QQ1, 0, 0, ZZx, 0, 0, ZZx, 0, 0);
     blasfeo_dtrsm_lunn(nZ1, nx1, 1.0, &QQ1, 0, 0, ZZx, 0, 0, ZZx, 0,
                        0);  // ZZx now contains QQ1\ZZx
@@ -1006,7 +937,7 @@ int sim_gnsf_precompute(void *config_, sim_in *in, sim_out *out, void *opts_, vo
 
 
     // solve dK2_dx2 = M2 \ dK2_dx2 to obtain dK2_dx2
-    blasfeo_drowpe(nK2, ipivM2, dK2_dx2);  // permute rhs dK2_dx2
+    blasfeo_drowpe(nK2, ipivM2, nx2, dK2_dx2, 0, 0);  // permute rhs dK2_dx2
     blasfeo_dtrsm_llnu(nK2, nx2, 1.0, M2_LU, 0, 0, dK2_dx2, 0, 0, dK2_dx2, 0, 0);
     blasfeo_dtrsm_lunn(nK2, nx2, 1.0, M2_LU, 0, 0, dK2_dx2, 0, 0, dK2_dx2, 0, 0);
 
@@ -1017,7 +948,7 @@ int sim_gnsf_precompute(void *config_, sim_in *in, sim_out *out, void *opts_, vo
             blasfeo_dgecp(nxz2, nu, BLO, 0, 0, dK2_du, ii * nxz2,  0);
                     // set ith block of dK2_du to BLO
         }
-        blasfeo_drowpe(nK2, ipivM2, dK2_du);  // permute also rhs
+        blasfeo_drowpe(nK2, ipivM2, nu, dK2_du, 0, 0);  // permute also rhs
         blasfeo_dtrsm_llnu(nK2, nu, 1.0, M2_LU, 0, 0, dK2_du, 0, 0, dK2_du, 0, 0);
         blasfeo_dtrsm_lunn(nK2, nu, 1.0, M2_LU, 0, 0, dK2_du, 0, 0, dK2_du, 0, 0);
 
@@ -1453,23 +1384,15 @@ int sim_gnsf_memory_set(void *config_, void *dims_, void *mem_, const char *fiel
 
 
 
-int sim_gnsf_memory_set_to_zero(void *config_, void * dims_, void *opts_, void *mem_, const char *field)
+int sim_gnsf_memory_set_to_zero(void *config_, void * dims_, void *opts_, void *mem_)
 {
     sim_gnsf_memory *mem = (sim_gnsf_memory *) mem_;
     sim_gnsf_dims *dims = (sim_gnsf_dims *) dims_;
 
     int status = ACADOS_SUCCESS;
 
-    if (!strcmp(field, "guesses"))
-    {
-        for (int ii=0; ii < dims->n_out; ii++)
-            mem->phi_guess[ii] = 0.0;
-    }
-    else
-    {
-        printf("sim_gnsf_memory_set_to_zero field %s is not supported! \n", field);
-        exit(1);
-    }
+    for (int ii=0; ii < dims->n_out; ii++)
+        mem->phi_guess[ii] = 0.0;
 
     return status;
 }
@@ -2362,8 +2285,8 @@ int sim_gnsf(void *config, sim_in *in, sim_out *out, void *args, void *mem_, voi
         {
             // pack seed into dxf_dwn, permute
             blasfeo_pack_dmat(nx, nx + nu, &in->S_forw[0], nx, dxf_dwn, 0, 0);
-            blasfeo_drowpe(nx, ipiv_x, dxf_dwn);
-            blasfeo_dcolpe(nx, ipiv_x, dxf_dwn);
+            blasfeo_drowpe(nx, ipiv_x, nx + nu, dxf_dwn, 0, 0);
+            blasfeo_dcolpe(nx, ipiv_x, nx, dxf_dwn, 0, 0);
 
 
             // S_forw_new_x = S_forw_x * dxf_dx
@@ -2393,8 +2316,8 @@ int sim_gnsf(void *config, sim_in *in, sim_out *out, void *args, void *mem_, voi
     {
         // pack seed into S_forw, permute
         blasfeo_pack_dmat(nx, nx + nu, &in->S_forw[0], nx, S_forw, 0, 0);
-        blasfeo_drowpe(nx, ipiv_x, S_forw);
-        blasfeo_dcolpe(nx, ipiv_x, S_forw);
+        blasfeo_drowpe(nx, ipiv_x, nx + nu, S_forw, 0, 0);
+        blasfeo_dcolpe(nx, ipiv_x, nx, S_forw, 0, 0);
 
         // initialize vv for first step, for further steps initialize with last vv value in step loop
         for (int i = 0; i < num_stages; i++)
@@ -2737,7 +2660,7 @@ int sim_gnsf(void *config, sim_in *in, sim_out *out, void *args, void *mem_, voi
                     // printf("dPHI_dyuhat = (forward, ss = %d) \n", ss);
                     // blasfeo_print_exp_dmat(nvv, ny+nuhat, dPHI_dyuhat, 0, 0);
 
-                    blasfeo_drowpe(nvv, ipiv, J_r_x1u);  // permute also rhs
+                    blasfeo_drowpe(nvv, ipiv, nx1 + nu, J_r_x1u, 0, 0);  // permute also rhs
                     blasfeo_dtrsm_llnu(nvv, nx1 + nu, 1.0, J_r_vv, 0, 0, J_r_x1u, 0, 0, J_r_x1u, 0, 0);
                     blasfeo_dtrsm_lunn(nvv, nx1 + nu, 1.0, J_r_vv, 0, 0, J_r_x1u, 0, 0, J_r_x1u, 0, 0);
                     out->info->LAtime += acados_toc(&la_timer);
@@ -2786,7 +2709,7 @@ int sim_gnsf(void *config, sim_in *in, sim_out *out, void *args, void *mem_, voi
 
                         // solve for dK2_dx1
                         acados_tic(&la_timer);
-                        blasfeo_drowpe(nK2, ipivM2, dK2_dx1);  // permute also rhs
+                        blasfeo_drowpe(nK2, ipivM2, nx1,  dK2_dx1, 0, 0);  // permute also rhs
                         blasfeo_dtrsm_llnu(nK2, nx1, 1.0, M2_LU, 0, 0,
                                         dK2_dx1, 0, 0, dK2_dx1, 0, 0);
                         blasfeo_dtrsm_lunn(nK2, nx1, 1.0, M2_LU, 0, 0, dK2_dx1, 0, 0, dK2_dx1, 0, 0);
@@ -2801,7 +2724,7 @@ int sim_gnsf(void *config, sim_in *in, sim_out *out, void *args, void *mem_, voi
                             // add - df_du (at stages concatenated) to dK2_du
                         // solve for dK2_du
                         acados_tic(&la_timer);
-                        blasfeo_drowpe(nK2, ipivM2, dK2_du);  // permute also rhs
+                        blasfeo_drowpe(nK2, ipivM2, nu, dK2_du, 0, 0);  // permute also rhs
                         blasfeo_dtrsm_llnu(nK2, nu, 1.0, M2_LU, 0, 0, dK2_du, 0, 0, dK2_du, 0, 0);
                         blasfeo_dtrsm_lunn(nK2, nu, 1.0, M2_LU, 0, 0, dK2_du, 0, 0, dK2_du, 0, 0);
                         out->info->LAtime += acados_toc(&la_timer);
@@ -2910,7 +2833,7 @@ int sim_gnsf(void *config, sim_in *in, sim_out *out, void *args, void *mem_, voi
                     blasfeo_dgead(nK2, nu,  1.0, &f_LO_jac_traj[ss], 0, 2 * nx1, dK2_du, 0, 0);
 
                     // solve dK2_du = M2 \ dK2_du
-                    blasfeo_drowpe(nK2, ipivM2, dK2_du);  // permute also rhs
+                    blasfeo_drowpe(nK2, ipivM2, nu, dK2_du, 0, 0);  // permute also rhs
                     blasfeo_dtrsm_llnu(nK2, nu, 1.0, M2_LU, 0, 0, dK2_du, 0, 0, dK2_du, 0, 0);
                     blasfeo_dtrsm_lunn(nK2, nu, 1.0, M2_LU, 0, 0, dK2_du, 0, 0, dK2_du, 0, 0);
                     out->info->LAtime += acados_toc(&la_timer);
@@ -2920,12 +2843,12 @@ int sim_gnsf(void *config, sim_in *in, sim_out *out, void *args, void *mem_, voi
                 /*  SOLVE LINEAR SYSTEMS  */
                 acados_tic(&la_timer);
                 // solve dK2_dvv = M2 \ dK2_dvv
-                blasfeo_drowpe(nK2, ipivM2, dK2_dvv);  // permute also rhs
+                blasfeo_drowpe(nK2, ipivM2, nvv, dK2_dvv, 0, 0);  // permute also rhs
                 blasfeo_dtrsm_llnu(nK2, nvv, 1.0, M2_LU, 0, 0, dK2_dvv, 0, 0, dK2_dvv, 0, 0);
                 blasfeo_dtrsm_lunn(nK2, nvv, 1.0, M2_LU, 0, 0, dK2_dvv, 0, 0, dK2_dvv, 0, 0);
 
                 // solve dK2_dx1 = M2 \ dK2_dx1
-                blasfeo_drowpe(nK2, ipivM2, dK2_dx1);  // permute also rhs
+                blasfeo_drowpe(nK2, ipivM2, nx1, dK2_dx1, 0, 0);  // permute also rhs
                 blasfeo_dtrsm_llnu(nK2, nx1, 1.0, M2_LU, 0, 0, dK2_dx1, 0, 0, dK2_dx1, 0, 0);
                 blasfeo_dtrsm_lunn(nK2, nx1, 1.0, M2_LU, 0, 0, dK2_dx1, 0, 0, dK2_dx1, 0, 0);
 
@@ -3023,8 +2946,8 @@ int sim_gnsf(void *config, sim_in *in, sim_out *out, void *args, void *mem_, voi
 
     if (opts->sens_forw)
     {
-        blasfeo_drowpei(nx, ipiv_x, S_forw_new);
-        blasfeo_dcolpei(nx, ipiv_x, S_forw_new);
+        blasfeo_drowpei(nx, ipiv_x, nx + nu, S_forw_new, 0, 0);
+        blasfeo_dcolpei(nx, ipiv_x, nx, S_forw_new, 0, 0);
         blasfeo_unpack_dmat(nx, nx + nu, S_forw_new, 0, 0, out->S_forw, nx);
     }
     if (opts->sens_adj)
@@ -3036,8 +2959,8 @@ int sim_gnsf(void *config, sim_in *in, sim_out *out, void *args, void *mem_, voi
     {
         // permute rows and cols
         blasfeo_dgecp(nz, nx+nu, S_algebraic, 0, 0, S_algebraic_aux, 0, 0);
-        blasfeo_drowpei(nz, ipiv_z, S_algebraic_aux);
-        blasfeo_dcolpei(nx, ipiv_x, S_algebraic_aux);
+        blasfeo_drowpei(nz, ipiv_z, nx + nu, S_algebraic_aux, 0, 0);
+        blasfeo_dcolpei(nx, ipiv_x, nz, S_algebraic_aux, 0, 0);
         blasfeo_unpack_dmat(nz, nx+nu, S_algebraic_aux, 0, 0, out->S_algebraic, nz);
     }
     if (opts->output_z)
@@ -3063,8 +2986,8 @@ void sim_gnsf_config_initialize_default(void *config_)
     config->evaluate = &sim_gnsf;
     config->precompute = &sim_gnsf_precompute;
     // opts
-    config->opts_calculate_size = &sim_gnsf_opts_calculate_size;
-    config->opts_assign = &sim_gnsf_opts_assign;
+    config->opts_calculate_size = &sim_opts_calculate_size;
+    config->opts_assign = &sim_opts_assign;
     config->opts_initialize_default = &sim_gnsf_opts_initialize_default;
     config->opts_update = &sim_gnsf_opts_update;
     config->opts_set = &sim_gnsf_opts_set;

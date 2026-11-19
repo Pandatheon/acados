@@ -3,29 +3,7 @@
  *
  * This file is part of acados.
  *
- * The 2-Clause BSD License
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright notice,
- * this list of conditions and the following disclaimer.
- *
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- * this list of conditions and the following disclaimer in the documentation
- * and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.;
+ * Licensed under the 2-Clause BSD License.
  */
 
 {% set dims_0 = phases_dims | first %}
@@ -52,6 +30,12 @@
 {%- endfor %}
 {%- set nu_max = nu_values | sort | last %}
 
+{%- set nz_values = [] -%}
+{%- for jj in range(end=n_phases) %}
+    {%- set_global nz_values = nz_values | concat(with=(phases_dims[jj].nz)) %}
+{%- endfor %}
+{%- set nz_max = nz_values | sort | last %}
+
 {%- set np_values = [] -%}
 {%- for jj in range(end=n_phases) %}
     {%- set_global np_values = np_values | concat(with=(phases_dims[jj].np)) %}
@@ -63,6 +47,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <string.h> // memcpy
+
 // acados
 // #include "acados/utils/print.h"
 #include "acados_c/ocp_nlp_interface.h"
@@ -75,7 +61,7 @@
 {%- if phases_dims[jj].nh > 0 or phases_dims[jj].nh_e > 0 or phases_dims[jj].nh_0 > 0 or phases_dims[jj].nphi > 0 or phases_dims[jj].nphi_e > 0 or phases_dims[jj].nphi_0 > 0 %}
 #include "{{ model[jj].name }}_constraints/{{ model[jj].name }}_constraints.h"
 {%- endif %}
-{%- if cost[jj].cost_type != "LINEAR_LS" or cost[jj].cost_type_e != "LINEAR_LS" or cost[jj].cost_type_0 != "LINEAR_LS" %}
+{%- if cost[jj].cost_type != "LINEAR_LS" or cost[jj].cost_type_e != "LINEAR_LS" or cost[jj].cost_type_0 != "LINEAR_LS" or model[jj].has_slack_cost_expr.path or model[jj].has_slack_cost_expr.initial or model[jj].has_slack_cost_expr.terminal %}
 #include "{{ model[jj].name }}_cost/{{ model[jj].name }}_cost.h"
 {%- endif %}
     {%- endfor %}{# for jj in range(end=n_phases) #}
@@ -103,9 +89,53 @@
 
 #define {{ name | upper }}_N      {{ N_horizon }}
 
+{%- set_global sparsity_threshold = 0.1 -%}
+
 {%- for jj in range(end=n_phases) %}
 #define NP_{{ jj }}     {{ phases_dims[jj].np }}
 {%- endfor %}
+
+{%- set_global parameter_values_nnz = [] -%}
+
+{%- for jj in range(end=n_phases) %}
+    {%- set_global nnz = 0 -%}
+    {%- for item in parameter_values[jj] -%}
+        {%- if item != 0.0 -%}
+            {%- set_global nnz = nnz + 1 -%}
+        {%- endif -%}
+    {%- endfor -%}
+    {%- set_global parameter_values_nnz = parameter_values_nnz | concat(with=(nnz)) %}
+{%- endfor %}
+
+{%- for jj in range(end=n_phases) %}
+{% if phases_dims[jj].np > 0 %}
+{% if parameter_values_nnz[jj] / phases_dims[jj].np > sparsity_threshold %}
+
+// initial value of stagewise parameters
+static const double p_init_{{ jj }}[] = {
+    {%- for item in parameter_values[jj] -%}{{ item }}, {%- endfor -%}
+};
+{%- endif %}
+{%- endif %}{# if phases_dims[jj].np #}
+{%- endfor %}
+
+
+{% if dims_0.np_global > 0 %}
+
+{%- set_global p_global_values_nnz = 0 -%}
+{%- for item in p_global_values -%}
+    {%- if item != 0.0 -%}
+        {%- set_global p_global_values_nnz = p_global_values_nnz + 1 -%}
+    {%- endif -%}
+{%- endfor -%}
+
+{% if p_global_values_nnz / dims_0.np_global > sparsity_threshold %}
+// initial value of global parameters
+static const double p_global_init[] = {
+    {%- for item in p_global_values -%}{{ item }}, {%- endfor -%}
+};
+{%- endif %}
+{%- endif %}{# if dims_0.np_global #}
 
 
 {{ name }}_solver_capsule * {{ name }}_acados_create_capsule(void)
@@ -166,6 +196,9 @@ void {{ name }}_acados_create_set_plan(ocp_nlp_plan_t* nlp_solver_plan, const in
         nlp_solver_plan->nlp_dynamics[i] = DISCRETE_MODEL;
         // discrete dynamics does not need sim solver option, this field is ignored
         nlp_solver_plan->sim_solver_plan[i].sim_solver = INVALID_SIM_SOLVER;
+      {%- elif mocp_opts.integrator_type[jj] == "ERK_WITH_COST" %}
+        nlp_solver_plan->nlp_dynamics[i] = CONTINUOUS_MODEL_WITH_COST;
+        nlp_solver_plan->sim_solver_plan[i].sim_solver = ERK;
       {%- else %}
         nlp_solver_plan->nlp_dynamics[i] = CONTINUOUS_MODEL;
         nlp_solver_plan->sim_solver_plan[i].sim_solver = {{ mocp_opts.integrator_type[jj] }};
@@ -363,12 +396,6 @@ ocp_nlp_dims* {{ name }}_acados_create_setup_dimensions({{ name }}_solver_capsul
         ocp_nlp_dims_set_dynamics(nlp_config, nlp_dims, i, "gnsf_nuhat", &gnsf_nuhat);
     }
   {%- endif %}
-
-  {%- if mocp_opts.cost_discretization[jj] == "INTEGRATOR" %}
-    for (int i = {{ start_idx[jj] }}; i < {{ end_idx[jj] }}; i++)
-        ocp_nlp_dims_set_dynamics(nlp_config, nlp_dims, i, "ny", &ny[i]);
-  {%- endif %}
-
 {%- endfor %}{# phases loop !#}
 
 
@@ -440,10 +467,10 @@ void {{ name }}_acados_create_setup_functions({{ name }}_solver_capsule* capsule
     {%- if solver_options.hessian_approx == "EXACT" %}
     MAP_CASADI_FNC(nl_constr_h_0_fun_jac_hess, {{ model[0].name }}_constr_h_0_fun_jac_uxt_zt_hess);
     {% endif %}
-    {%- if solver_options.with_solution_sens_wrt_params %}
+    {%- if code_gen_options.with_solution_sens_wrt_params_forw %}
     MAP_CASADI_FNC(nl_constr_h_0_jac_p_hess_xu_p, {{ model[0].name }}_constr_h_0_jac_p_hess_xu_p);
     {%- endif %}
-    {%- if solver_options.with_value_sens_wrt_params %}
+    {%- if code_gen_options.with_value_sens_wrt_params %}
     MAP_CASADI_FNC(nl_constr_h_0_adj_p, {{ model[0].name }}_constr_h_0_adj_p);
     {%- endif %}
 {%- elif constraints[0].constr_type_0 == "BGP" %}
@@ -492,7 +519,9 @@ void {{ name }}_acados_create_setup_functions({{ name }}_solver_capsule* capsule
     {%- endif %}
 {%- endif %}
 
-
+{%- if model[0].has_slack_cost_expr.initial %}
+    MAP_CASADI_FNC(slack_penalty_fun_zZ_0, {{ model[0].name }}_cost_slack_penalty_fun_zZ_0);
+{%- endif %}
 
 /////////////// PATH
     int n_path, n_cost_path;
@@ -515,13 +544,13 @@ void {{ name }}_acados_create_setup_functions({{ name }}_solver_capsule* capsule
         MAP_CASADI_FNC(nl_constr_h_fun_jac_hess_{{ jj }}[i], {{ model[jj].name }}_constr_h_fun_jac_uxt_zt_hess);
     }
     {% endif %}
-    {%- if solver_options.with_solution_sens_wrt_params %}
+    {%- if code_gen_options.with_solution_sens_wrt_params_forw %}
     capsule->nl_constr_h_jac_p_hess_xu_p_{ jj } = (external_function_external_param_casadi *) malloc(sizeof(external_function_external_param_casadi)*n_cost_path);
     for (int i = 0; i < n_cost_path; i++) {
         MAP_CASADI_FNC(nl_constr_h_jac_p_hess_xu_p_{{ jj }}[i], {{ model[jj].name }}_constr_h_jac_p_hess_xu_p);
     }
     {%- endif %}
-    {%- if solver_options.with_value_sens_wrt_params %}
+    {%- if code_gen_options.with_value_sens_wrt_params %}
     capsule->nl_constr_h_adj_p_{ jj } = (external_function_external_param_casadi *) malloc(sizeof(external_function_external_param_casadi)*n_cost_path);
     for (int i = 0; i < n_cost_path; i++) {
         MAP_CASADI_FNC(nl_constr_h_adj_p_{{ jj }}[i], {{ model[jj].name }}_constr_h_adj_p);
@@ -538,7 +567,7 @@ void {{ name }}_acados_create_setup_functions({{ name }}_solver_capsule* capsule
     }
 {%- endif %}
 
-{% if mocp_opts.integrator_type[jj] == "ERK" %}
+{% if mocp_opts.integrator_type[jj] is starting_with("ERK") %}
     // explicit ode
     capsule->expl_vde_forw_{{ jj }} = (external_function_external_param_casadi *) malloc(sizeof(external_function_external_param_casadi)*n_path);
     for (int i = 0; i < n_path; i++) {
@@ -751,6 +780,11 @@ void {{ name }}_acados_create_setup_functions({{ name }}_solver_capsule* capsule
         {%- endif %}
     }
 {%- endif %}
+{%- if model[jj].has_slack_cost_expr.path %}
+    capsule->slack_penalty_fun_zZ_{{ jj }} = (external_function_external_param_casadi *) malloc(sizeof(external_function_external_param_casadi)*n_cost_path);
+    for (int i = 0; i < n_cost_path; i++)
+        MAP_CASADI_FNC(slack_penalty_fun_zZ_{{ jj }}[i], {{ model[jj].name }}_cost_slack_penalty_fun_zZ);
+{%- endif %}
 {%- endfor %}
 
 
@@ -763,10 +797,10 @@ void {{ name }}_acados_create_setup_functions({{ name }}_solver_capsule* capsule
     {%- if solver_options.hessian_approx == "EXACT" %}
     MAP_CASADI_FNC(nl_constr_h_e_fun_jac_hess, {{ model_e.name }}_constr_h_e_fun_jac_uxt_zt_hess);
     {% endif %}
-    {% if solver_options.with_solution_sens_wrt_params %}
+    {% if code_gen_options.with_solution_sens_wrt_params_forw %}
     MAP_CASADI_FNC(nl_constr_h_e_jac_p_hess_xu_p, {{ model_e.name }}_constr_h_e_jac_p_hess_xu_p);
     {%- endif %}
-    {% if solver_options.with_value_sens_wrt_params %}
+    {% if code_gen_options.with_value_sens_wrt_params %}
     MAP_CASADI_FNC(nl_constr_h_e_adj_p, {{ model_e.name }}_constr_h_e_adj_p);
     {%- endif %}
 {%- elif constraints_e.constr_type_e == "BGP" %}
@@ -812,6 +846,9 @@ void {{ name }}_acados_create_setup_functions({{ name }}_solver_capsule* capsule
     external_function_external_param_{{ cost_e.cost_ext_fun_type_e }}_create(&capsule->ext_cost_e_fun_jac_hess, &ext_fun_opts);
     {%- endif %}
 {%- endif %}
+{%- if model_e.has_slack_cost_expr.terminal %}
+    MAP_CASADI_FNC(slack_penalty_fun_zZ_e, {{ model_e.name }}_cost_slack_penalty_fun_zZ_e);
+{%- endif %}
 
 #undef MAP_CASADI_FNC
 }
@@ -823,29 +860,45 @@ void {{ name }}_acados_create_setup_functions({{ name }}_solver_capsule* capsule
  */
 void {{ name }}_acados_create_set_default_parameters({{ name }}_solver_capsule* capsule) {
 
-    double* p = calloc({{ np_max }}, sizeof(double));
     // initialize parameters to nominal value
-{%- for jj in range(end=n_phases) %}{# phases loop !#}
+    double* p = calloc({{ np_max }}, sizeof(double));
+    {%- for jj in range(end=n_phases) %}{# phases loop !#}
+
+    {% if phases_dims[jj].np > 0 %}
+
+    {% if parameter_values_nnz[jj] / phases_dims[jj].np > sparsity_threshold %}
+    memcpy(p, p_init_{{ jj }}, NP_{{ jj }}*sizeof(double));
+    {%- else %}
     {%- for item in parameter_values[jj] %}
         {%- if item != 0 %}
     p[{{ loop.index0 }}] = {{ item }};
         {%- endif %}
     {%- endfor %}
+    {%- endif %}
 
     for (int i = {{ start_idx[jj] }}; i < {{ end_idx[jj] }}; i++) {
         {{ name }}_acados_update_params(capsule, i, p, NP_{{ jj }});
     }
+    {%- endif %}{# if phases_dims[jj].np #}
 {%- endfor %}
     free(p);
 
 {%- if phases_dims[0].np_global > 0 %}
-    double* p_global = calloc({{ phases_dims[0].np_global }}, sizeof(double));
+
     // initialize global parameters to nominal value
+    {%- if p_global_values_nnz / phases_dims[0].np_global > sparsity_threshold %}
+
+    double* p_global = malloc({{ dims_0.np_global }}*sizeof(double));
+    memcpy(p_global, p_global_init, {{ dims_0.np_global }}*sizeof(double));
+    {%- else %}
+    double* p_global = calloc({{ dims_0.np_global }}, sizeof(double));
     {%- for item in p_global_values %}
         {%- if item != 0 %}
     p_global[{{ loop.index0 }}] = {{ item }};
         {%- endif %}
     {%- endfor %}
+
+    {%- endif %}
 
     {{ name }}_acados_set_p_global_and_precompute_dependencies(capsule, p_global, {{ phases_dims[0].np_global }});
 
@@ -859,7 +912,7 @@ void {{ name }}_acados_create_set_default_parameters({{ name }}_solver_capsule* 
 /**
  * Internal function for {{ name }}_acados_create: step 5
  */
-void {{ name }}_acados_create_setup_nlp_in({{ name }}_solver_capsule* capsule, int N)
+void {{ name }}_acados_create_setup_nlp_in_numerical_values({{ name }}_solver_capsule* capsule, int N)
 {
     assert(N == capsule->nlp_solver_plan->N);
     ocp_nlp_config* nlp_config = capsule->nlp_config;
@@ -984,34 +1037,8 @@ void {{ name }}_acados_create_setup_nlp_in({{ name }}_solver_capsule* capsule, i
   {%- endif %}{# LINEAR_LS #}
 {%- endif %}{# ny_0 != 0 #}
 
-
-{%- if cost[0].cost_type_0 == "NONLINEAR_LS" %}
-    ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0, "nls_y_fun", &capsule->cost_y_0_fun);
-    ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0, "nls_y_fun_jac", &capsule->cost_y_0_fun_jac_ut_xt);
-    {%- if solver_options.hessian_approx == "EXACT" %}
-    ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0, "nls_y_hess", &capsule->cost_y_0_hess);
-    {%- endif %}
-{%- elif cost[0].cost_type_0 == "CONVEX_OVER_NONLINEAR" %}
-    ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0, "conl_cost_fun", &capsule->conl_cost_0_fun);
-    ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0, "conl_cost_fun_jac_hess", &capsule->conl_cost_0_fun_jac_hess);
-{%- elif cost[0].cost_type_0 == "EXTERNAL" %}
-    ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0, "ext_cost_fun", &capsule->ext_cost_0_fun);
-    ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0, "ext_cost_fun_jac", &capsule->ext_cost_0_fun_jac);
-    ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0, "ext_cost_fun_jac_hess", &capsule->ext_cost_0_fun_jac_hess);
-{%- endif %}
-
-{%- if mocp_opts.cost_discretization[0] == "INTEGRATOR" %}
-  {%- if cost[0].cost_type_0 == "NONLINEAR_LS" %}
-    ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0, "nls_y_fun_jac", &capsule->cost_y_0_fun_jac_ut_xt);
-    ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0, "nls_y_fun", &capsule->cost_y_0_fun);
-  {%- elif cost[0].cost_type_0 == "CONVEX_OVER_NONLINEAR" %}
-    ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0, "conl_cost_fun", &capsule->conl_cost_0_fun);
-    ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0, "conl_cost_fun_jac_hess", &capsule->conl_cost_0_fun_jac_hess);
-  {%- endif %}
-{%- endif %}
-
-
 {% if dims_0.ns_0 > 0 %}
+{%- if not model[0].has_slack_cost_expr.initial %}
     // slacks terminal
     double* zlu0_mem = calloc(4*{{ dims_0.ns_0 }}, sizeof(double));
     double* Zl_0 = zlu0_mem+{{ dims_0.ns_0 }}*0;
@@ -1049,6 +1076,7 @@ void {{ name }}_acados_create_setup_nlp_in({{ name }}_solver_capsule* capsule, i
     ocp_nlp_cost_model_set(nlp_config, nlp_dims, nlp_in, 0, "zl", zl_0);
     ocp_nlp_cost_model_set(nlp_config, nlp_dims, nlp_in, 0, "zu", zu_0);
     free(zlu0_mem);
+{%- endif %}
 {%- endif %}
 
     // constraints at initial node
@@ -1108,22 +1136,8 @@ void {{ name }}_acados_create_setup_nlp_in({{ name }}_solver_capsule* capsule, i
         {%- endif %}
     {%- endfor %}
 
-    ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0, "nl_constr_h_fun_jac", &capsule->nl_constr_h_0_fun_jac);
-    ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0, "nl_constr_h_fun", &capsule->nl_constr_h_0_fun);
-    {% if solver_options.hessian_approx == "EXACT" %}
-    ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0, "nl_constr_h_fun_jac_hess",
-                                  &capsule->nl_constr_h_0_fun_jac_hess);
-    {% endif %}
     ocp_nlp_constraints_model_set(nlp_config, nlp_dims, nlp_in, nlp_out, 0, "lh", lh_0);
     ocp_nlp_constraints_model_set(nlp_config, nlp_dims, nlp_in, nlp_out, 0, "uh", uh_0);
-    {% if solver_options.with_solution_sens_wrt_params %}
-    ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0, "nl_constr_h_jac_p_hess_xu_p",
-                                  &capsule->nl_constr_h_0_jac_p_hess_xu_p);
-    {% endif %}
-    {% if solver_options.with_value_sens_wrt_params %}
-    ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0, "nl_constr_h_adj_p",
-                                  &capsule->nl_constr_h_0_adj_p);
-    {% endif %}
     free(luh_0);
 {%- elif dims_0.nphi_0 > 0 and constraints_0.constr_type_0 == "BGP" %}
     // set up convex-over-nonlinear constraints for first stage
@@ -1141,13 +1155,8 @@ void {{ name }}_acados_create_setup_nlp_in({{ name }}_solver_capsule* capsule, i
 
     ocp_nlp_constraints_model_set(nlp_config, nlp_dims, nlp_in, nlp_out, 0, "lphi", lphi_0);
     ocp_nlp_constraints_model_set(nlp_config, nlp_dims, nlp_in, nlp_out, 0, "uphi", uphi_0);
-    ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0,
-                                  "nl_constr_phi_o_r_fun", &capsule->phi_0_constraint_fun);
-    ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0,
-                                  "nl_constr_phi_o_r_fun_phi_jac_ux_z_phi_hess_r_jac_ux", &capsule->phi_0_constraint_fun_jac_hess);
     free(luphi_0);
 {% endif %}
-
 
 {% set_global n_idxs_rev_0 = constraints_0.idxs_rev_0 | length %}
 {% if n_idxs_rev_0 > 0 %}{# idxs* formulation initial #}
@@ -1310,97 +1319,6 @@ void {{ name }}_acados_create_setup_nlp_in({{ name }}_solver_capsule* capsule, i
     /*********************
      *  Phase {{ jj }}
      * *******************/
-    /**** Dynamics ****/
-    for (int i = {{ start_idx[jj] }}; i < {{ end_idx[jj] }}; i++)
-    {
-        i_fun = i - {{ start_idx[jj] }};
-    {%- if mocp_opts.integrator_type[jj] == "ERK" %}
-        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "expl_vde_forw", &capsule->expl_vde_forw_{{ jj }}[i_fun]);
-        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "expl_vde_adj", &capsule->expl_vde_adj_{{ jj }}[i_fun]);
-        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "expl_ode_fun", &capsule->expl_ode_fun_{{ jj }}[i_fun]);
-        {%- if solver_options.hessian_approx == "EXACT" %}
-        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "expl_ode_hess", &capsule->expl_ode_hess_{{ jj }}[i_fun]);
-        {%- endif %}
-    {%- elif mocp_opts.integrator_type[jj] == "IRK" %}
-        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "impl_dae_fun", &capsule->impl_dae_fun_{{ jj }}[i_fun]);
-        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i,
-                                   "impl_dae_fun_jac_x_xdot_z", &capsule->impl_dae_fun_jac_x_xdot_z_{{ jj }}[i_fun]);
-        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i,
-                                   "impl_dae_jac_x_xdot_u", &capsule->impl_dae_jac_x_xdot_u_z_{{ jj }}[i_fun]);
-        {%- if solver_options.hessian_approx == "EXACT" %}
-        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "impl_dae_hess", &capsule->impl_dae_hess_{{ jj }}[i_fun]);
-        {%- endif %}
-    {%- elif mocp_opts.integrator_type[jj] == "LIFTED_IRK" %}
-        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "impl_dae_fun", &capsule->impl_dae_fun_{{ jj }}[i_fun]);
-        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i,
-                                   "impl_dae_fun_jac_x_xdot_u", &capsule->impl_dae_fun_jac_x_xdot_u_{{ jj }}[i_fun]);
-    {%- elif mocp_opts.integrator_type[jj] == "GNSF" %}
-        {% if model[jj].gnsf_model.purely_linear != 1 %}
-        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "phi_fun", &capsule->gnsf_phi_fun_{{ jj }}[i_fun]);
-        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "phi_fun_jac_y", &capsule->gnsf_phi_fun_jac_y_{{ jj }}[i_fun]);
-        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "phi_jac_y_uhat", &capsule->gnsf_phi_jac_y_uhat_{{ jj }}[i_fun]);
-            {% if model[jj].gnsf_model.nontrivial_f_LO == 1 %}
-        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "f_lo_jac_x1_x1dot_u_z",
-                                   &capsule->gnsf_f_lo_jac_x1_x1dot_u_z_{{ jj }}[i_fun]);
-            {%- endif %}
-        {%- endif %}
-        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "gnsf_get_matrices_fun",
-                                   &capsule->gnsf_get_matrices_fun_{{ jj }}[i_fun]);
-    {%- elif mocp_opts.integrator_type[jj] == "DISCRETE" %}
-        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "disc_dyn_fun", &capsule->discr_dyn_phi_fun_{{ jj }}[i_fun]);
-        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "disc_dyn_fun_jac",
-                                   &capsule->discr_dyn_phi_fun_jac_ut_xt_{{ jj }}[i_fun]);
-        {%- if solver_options.hessian_approx == "EXACT" %}
-        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "disc_dyn_fun_jac_hess",
-                                   &capsule->discr_dyn_phi_fun_jac_ut_xt_hess_{{ jj }}[i_fun]);
-        {%- endif %}
-    {%- endif %}
-    }
-
-
-{%- if cost[jj].cost_type == "NONLINEAR_LS" %}
-    for (int i = {{ cost_start_idx[jj] }}; i < {{ end_idx[jj] }}; i++)
-    {
-        i_fun = i - {{ cost_start_idx[jj] }};
-
-        ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "nls_y_fun", &capsule->cost_y_fun_{{ jj }}[i_fun]);
-        ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "nls_y_fun_jac", &capsule->cost_y_fun_jac_ut_xt_{{ jj }}[i_fun]);
-        {%- if solver_options.hessian_approx == "EXACT" %}
-        ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "nls_y_hess", &capsule->cost_y_hess_{{ jj }}[i_fun]);
-        {%- endif %}
-    }
-{%- elif cost[jj].cost_type == "CONVEX_OVER_NONLINEAR" %}
-    for (int i = {{ cost_start_idx[jj] }}; i < {{ end_idx[jj] }}; i++)
-    {
-        i_fun = i - {{ cost_start_idx[jj] }};
-        ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "conl_cost_fun", &capsule->conl_cost_fun_{{ jj }}[i_fun]);
-        ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "conl_cost_fun_jac_hess", &capsule->conl_cost_fun_jac_hess_{{ jj }}[i_fun]);
-    }
-{%- elif cost[jj].cost_type == "EXTERNAL" %}
-    for (int i = {{ cost_start_idx[jj] }}; i < {{ end_idx[jj] }}; i++)
-    {
-        i_fun = i - {{ cost_start_idx[jj] }};
-        ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "ext_cost_fun", &capsule->ext_cost_fun_{{ jj }}[i_fun]);
-        ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "ext_cost_fun_jac", &capsule->ext_cost_fun_jac_{{ jj }}[i_fun]);
-        ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "ext_cost_fun_jac_hess", &capsule->ext_cost_fun_jac_hess_{{ jj }}[i_fun]);
-    }
-{%- endif %}
-
-
-
-{%- if mocp_opts.cost_discretization[jj] == "INTEGRATOR" %}
-    for (int i = {{ cost_start_idx[jj] }}; i < {{ end_idx[jj] }}; i++)
-    {
-        i_fun = i - {{ cost_start_idx[jj] }};
-  {%- if cost[jj].cost_type == "NONLINEAR_LS" %}
-        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "nls_y_fun_jac", &capsule->cost_y_fun_jac_ut_xt_{{ jj }}[i_fun]);
-        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "nls_y_fun", &capsule->cost_y_fun_{{ jj }}[i_fun]);
-  {%- elif cost[jj].cost_type == "CONVEX_OVER_NONLINEAR" %}
-        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "conl_cost_fun", &capsule->conl_cost_fun_{{ jj }}[i_fun]);
-        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "conl_cost_fun_jac_hess", &capsule->conl_cost_fun_jac_hess_{{ jj }}[i_fun]);
-  {%- endif %}
-    }
-{%- endif %}
 
     /**** Cost phase {{ jj }} ****/
 
@@ -1492,6 +1410,7 @@ void {{ name }}_acados_create_setup_nlp_in({{ name }}_solver_capsule* capsule, i
 
 
 {%- if phases_dims[jj].ns > 0 %}
+{%- if not model[jj].has_slack_cost_expr.path %}
     zlumem = calloc(4*{{ phases_dims[jj].ns }}, sizeof(double));
     Zl = zlumem+{{ phases_dims[jj].ns }}*0;
     Zu = zlumem+{{ phases_dims[jj].ns }}*1;
@@ -1530,6 +1449,7 @@ void {{ name }}_acados_create_setup_nlp_in({{ name }}_solver_capsule* capsule, i
         ocp_nlp_cost_model_set(nlp_config, nlp_dims, nlp_in, i, "zu", zu);
     }
     free(zlumem);
+{%- endif %}
 {%- endif %}
 
 
@@ -1719,24 +1639,8 @@ void {{ name }}_acados_create_setup_nlp_in({{ name }}_solver_capsule* capsule, i
     for (int i = {{ cost_start_idx[jj] }}; i < {{ end_idx[jj] }}; i++)
     {
         i_fun = i - {{ cost_start_idx[jj] }};
-        ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "nl_constr_h_fun_jac",
-                                      &capsule->nl_constr_h_fun_jac_{{ jj }}[i_fun]);
-        ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "nl_constr_h_fun",
-                                      &capsule->nl_constr_h_fun_{{ jj }}[i_fun]);
-        {% if solver_options.hessian_approx == "EXACT" %}
-        ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i,
-                                      "nl_constr_h_fun_jac_hess", &capsule->nl_constr_h_fun_jac_hess_{{ jj }}[i_fun]);
-        {% endif %}
         ocp_nlp_constraints_model_set(nlp_config, nlp_dims, nlp_in, nlp_out, i, "lh", lh);
         ocp_nlp_constraints_model_set(nlp_config, nlp_dims, nlp_in, nlp_out, i, "uh", uh);
-        {% if solver_options.with_solution_sens_wrt_params %}
-        ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i,
-                                      "nl_constr_h_jac_p_hess_xu_p", &capsule->nl_constr_h_jac_p_hess_xu_p_{{ jj }}[i_fun]);
-        {% endif %}
-        {% if solver_options.with_value_sens_wrt_params %}
-        ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i,
-                                      "nl_constr_h_adj_p", &capsule->nl_constr_h_adj_p_{{ jj }}[i_fun]);
-        {% endif %}
     }
     free(luh);
 {%- endif %}
@@ -1761,9 +1665,6 @@ void {{ name }}_acados_create_setup_nlp_in({{ name }}_solver_capsule* capsule, i
     for (int i = {{ cost_start_idx[jj] }}; i < {{ end_idx[jj] }}; i++)
     {
         i_fun = i - {{ cost_start_idx[jj] }};
-        ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "nl_constr_phi_o_r_fun", &capsule->phi_constraint_fun[i_fun]);
-        ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i,
-                                      "nl_constr_phi_o_r_fun_phi_jac_ux_z_phi_hess_r_jac_ux", &capsule->phi_constraint_fun_jac_hess[i_fun]);
         ocp_nlp_constraints_model_set(nlp_config, nlp_dims, nlp_in, nlp_out, i, "lphi", lphi);
         ocp_nlp_constraints_model_set(nlp_config, nlp_dims, nlp_in, nlp_out, i, "uphi", uphi);
     }
@@ -1940,27 +1841,8 @@ void {{ name }}_acados_create_setup_nlp_in({{ name }}_solver_capsule* capsule, i
   {%- endif %}
 {%- endif %}{# ny_e != 0 #}
 
-
-{%- if cost_e.cost_type_e == "NONLINEAR_LS" %}
-    ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, N, "nls_y_fun", &capsule->cost_y_e_fun);
-    ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, N, "nls_y_fun_jac", &capsule->cost_y_e_fun_jac_ut_xt);
-    {%- if solver_options.hessian_approx == "EXACT" %}
-    ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, N, "nls_y_hess", &capsule->cost_y_e_hess);
-    {%- endif %}
-
-{%- elif cost_e.cost_type_e == "CONVEX_OVER_NONLINEAR" %}
-    ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, N, "conl_cost_fun", &capsule->conl_cost_e_fun);
-    ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, N, "conl_cost_fun_jac_hess", &capsule->conl_cost_e_fun_jac_hess);
-
-{%- elif cost_e.cost_type_e == "EXTERNAL" %}
-    ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, N, "ext_cost_fun", &capsule->ext_cost_e_fun);
-    ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, N, "ext_cost_fun_jac", &capsule->ext_cost_e_fun_jac);
-    ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, N, "ext_cost_fun_jac_hess", &capsule->ext_cost_e_fun_jac_hess);
-{%- endif %}
-
-
-
 {% if dims_e.ns_e > 0 %}
+{%- if not model_e.has_slack_cost_expr.terminal %}
     // slacks terminal
     double* zluemem = calloc(4*{{ dims_e.ns_e }}, sizeof(double));
     double* Zl_e = zluemem+{{ dims_e.ns_e }}*0;
@@ -1999,9 +1881,7 @@ void {{ name }}_acados_create_setup_nlp_in({{ name }}_solver_capsule* capsule, i
     ocp_nlp_cost_model_set(nlp_config, nlp_dims, nlp_in, N, "zu", zu_e);
     free(zluemem);
 {%- endif %}
-
-
-
+{%- endif %}
 
 
     /* terminal constraints */
@@ -2079,22 +1959,8 @@ void {{ name }}_acados_create_setup_nlp_in({{ name }}_solver_capsule* capsule, i
         {%- endif %}
     {%- endfor %}
 
-    ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, N, "nl_constr_h_fun_jac", &capsule->nl_constr_h_e_fun_jac);
-    ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, N, "nl_constr_h_fun", &capsule->nl_constr_h_e_fun);
-    {% if solver_options.hessian_approx == "EXACT" %}
-    ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, N, "nl_constr_h_fun_jac_hess",
-                                  &capsule->nl_constr_h_e_fun_jac_hess);
-    {% endif %}
     ocp_nlp_constraints_model_set(nlp_config, nlp_dims, nlp_in, nlp_out, N, "lh", lh_e);
     ocp_nlp_constraints_model_set(nlp_config, nlp_dims, nlp_in, nlp_out, N, "uh", uh_e);
-    {% if solver_options.with_solution_sens_wrt_params %}
-    ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, N, "nl_constr_h_jac_p_hess_xu_p",
-                                  &capsule->nl_constr_h_e_jac_p_hess_xu_p);
-    {% endif %}
-    {% if solver_options.with_value_sens_wrt_params %}
-    ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, N, "nl_constr_h_adj_p",
-                                  &capsule->nl_constr_h_e_adj_p);
-    {% endif %}
     free(luh_e);
 {%- elif dims_e.nphi_e > 0 and constraints_e.constr_type_e == "BGP" %}
     // set up convex-over-nonlinear constraints for last stage
@@ -2112,9 +1978,6 @@ void {{ name }}_acados_create_setup_nlp_in({{ name }}_solver_capsule* capsule, i
 
     ocp_nlp_constraints_model_set(nlp_config, nlp_dims, nlp_in, nlp_out, N, "lphi", lphi_e);
     ocp_nlp_constraints_model_set(nlp_config, nlp_dims, nlp_in, nlp_out, N, "uphi", uphi_e);
-    ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, N, "nl_constr_phi_o_r_fun", &capsule->phi_e_constraint_fun);
-    ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, N,
-                                  "nl_constr_phi_o_r_fun_phi_jac_ux_z_phi_hess_r_jac_ux", &capsule->phi_e_constraint_fun_jac_hess);
     free(luphi_e);
 {% endif %}
 
@@ -2253,6 +2116,247 @@ void {{ name }}_acados_create_setup_nlp_in({{ name }}_solver_capsule* capsule, i
 }
 
 
+
+
+void {{ name }}_acados_create_setup_nlp_in({{ name }}_solver_capsule* capsule, int N)
+{
+    assert(N == capsule->nlp_solver_plan->N);
+    ocp_nlp_config* nlp_config = capsule->nlp_config;
+    ocp_nlp_dims* nlp_dims = capsule->nlp_dims;
+
+    int tmp_int = 0;
+
+    /************************************************
+    *  nlp_in
+    ************************************************/
+    ocp_nlp_in * nlp_in = capsule->nlp_in;
+    /************************************************
+    *  nlp_out
+    ************************************************/
+    ocp_nlp_out * nlp_out = capsule->nlp_out;
+
+    /* INITIAL NODE */
+{%- if cost[0].cost_type_0 == "NONLINEAR_LS" %}
+    ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0, "nls_y_fun", &capsule->cost_y_0_fun);
+    ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0, "nls_y_fun_jac", &capsule->cost_y_0_fun_jac_ut_xt);
+    {%- if solver_options.hessian_approx == "EXACT" %}
+    ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0, "nls_y_hess", &capsule->cost_y_0_hess);
+    {%- endif %}
+{%- elif cost[0].cost_type_0 == "CONVEX_OVER_NONLINEAR" %}
+    ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0, "conl_cost_fun", &capsule->conl_cost_0_fun);
+    ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0, "conl_cost_fun_jac_hess", &capsule->conl_cost_0_fun_jac_hess);
+{%- elif cost[0].cost_type_0 == "EXTERNAL" %}
+    ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0, "ext_cost_fun", &capsule->ext_cost_0_fun);
+    ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0, "ext_cost_fun_jac", &capsule->ext_cost_0_fun_jac);
+    ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0, "ext_cost_fun_jac_hess", &capsule->ext_cost_0_fun_jac_hess);
+{%- endif %}
+{%- if model[0].has_slack_cost_expr.initial %}
+    ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0, "slack_penalty_fun_zZ", &capsule->slack_penalty_fun_zZ_0);
+{%- endif %}
+
+
+{% if dims_0.nh_0 > 0 %}
+    // set up nonlinear constraints for first stage
+    ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0, "nl_constr_h_fun_jac", &capsule->nl_constr_h_0_fun_jac);
+    ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0, "nl_constr_h_fun", &capsule->nl_constr_h_0_fun);
+    {% if solver_options.hessian_approx == "EXACT" %}
+    ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0, "nl_constr_h_fun_jac_hess",
+                                  &capsule->nl_constr_h_0_fun_jac_hess);
+    {% endif %}
+    {% if code_gen_options.with_solution_sens_wrt_params_forw %}
+    ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0, "nl_constr_h_jac_p_hess_xu_p",
+                                  &capsule->nl_constr_h_0_jac_p_hess_xu_p);
+    {% endif %}
+    {% if code_gen_options.with_value_sens_wrt_params %}
+    ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0, "nl_constr_h_adj_p",
+                                  &capsule->nl_constr_h_0_adj_p);
+    {% endif %}
+{%- elif dims_0.nphi_0 > 0 and constraints_0.constr_type_0 == "BGP" %}
+    // set up convex-over-nonlinear constraints for first stage
+    ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0,
+                                  "nl_constr_phi_o_r_fun", &capsule->phi_0_constraint_fun);
+    ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0,
+                                  "nl_constr_phi_o_r_fun_phi_jac_ux_z_phi_hess_r_jac_ux", &capsule->phi_0_constraint_fun_jac_hess);
+{% endif %}
+
+    /* Path related delarations */
+    int i_fun;
+
+{%- for jj in range(end=n_phases) %}{# phases loop !#}
+
+    /*********************
+     *  Phase {{ jj }}
+     * *******************/
+    /**** Dynamics ****/
+    for (int i = {{ start_idx[jj] }}; i < {{ end_idx[jj] }}; i++)
+    {
+        i_fun = i - {{ start_idx[jj] }};
+    {%- if mocp_opts.integrator_type[jj] is starting_with("ERK") %}
+        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "expl_vde_forw", &capsule->expl_vde_forw_{{ jj }}[i_fun]);
+        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "expl_vde_adj", &capsule->expl_vde_adj_{{ jj }}[i_fun]);
+        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "expl_ode_fun", &capsule->expl_ode_fun_{{ jj }}[i_fun]);
+        {%- if solver_options.hessian_approx == "EXACT" %}
+        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "expl_ode_hess", &capsule->expl_ode_hess_{{ jj }}[i_fun]);
+        {%- endif %}
+    {%- elif mocp_opts.integrator_type[jj] == "IRK" %}
+        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "impl_dae_fun", &capsule->impl_dae_fun_{{ jj }}[i_fun]);
+        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i,
+                                   "impl_dae_fun_jac_x_xdot_z", &capsule->impl_dae_fun_jac_x_xdot_z_{{ jj }}[i_fun]);
+        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i,
+                                   "impl_dae_jac_x_xdot_u_z", &capsule->impl_dae_jac_x_xdot_u_z_{{ jj }}[i_fun]);
+        {%- if solver_options.hessian_approx == "EXACT" %}
+        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "impl_dae_hess", &capsule->impl_dae_hess_{{ jj }}[i_fun]);
+        {%- endif %}
+    {%- elif mocp_opts.integrator_type[jj] == "LIFTED_IRK" %}
+        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "impl_dae_fun", &capsule->impl_dae_fun_{{ jj }}[i_fun]);
+        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i,
+                                   "impl_dae_fun_jac_x_xdot_u", &capsule->impl_dae_fun_jac_x_xdot_u_{{ jj }}[i_fun]);
+    {%- elif mocp_opts.integrator_type[jj] == "GNSF" %}
+        {% if model[jj].gnsf_model.purely_linear != 1 %}
+        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "phi_fun", &capsule->gnsf_phi_fun_{{ jj }}[i_fun]);
+        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "phi_fun_jac_y", &capsule->gnsf_phi_fun_jac_y_{{ jj }}[i_fun]);
+        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "phi_jac_y_uhat", &capsule->gnsf_phi_jac_y_uhat_{{ jj }}[i_fun]);
+            {% if model[jj].gnsf_model.nontrivial_f_LO == 1 %}
+        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "f_lo_jac_x1_x1dot_u_z",
+                                   &capsule->gnsf_f_lo_jac_x1_x1dot_u_z_{{ jj }}[i_fun]);
+            {%- endif %}
+        {%- endif %}
+        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "gnsf_get_matrices_fun",
+                                   &capsule->gnsf_get_matrices_fun_{{ jj }}[i_fun]);
+    {%- elif mocp_opts.integrator_type[jj] == "DISCRETE" %}
+        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "disc_dyn_fun", &capsule->discr_dyn_phi_fun_{{ jj }}[i_fun]);
+        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "disc_dyn_fun_jac",
+                                   &capsule->discr_dyn_phi_fun_jac_ut_xt_{{ jj }}[i_fun]);
+        {%- if solver_options.hessian_approx == "EXACT" %}
+        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "disc_dyn_fun_jac_hess",
+                                   &capsule->discr_dyn_phi_fun_jac_ut_xt_hess_{{ jj }}[i_fun]);
+        {%- endif %}
+    {%- endif %}
+    }
+
+
+{%- if cost[jj].cost_type == "NONLINEAR_LS" %}
+    for (int i = {{ cost_start_idx[jj] }}; i < {{ end_idx[jj] }}; i++)
+    {
+        i_fun = i - {{ cost_start_idx[jj] }};
+
+        ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "nls_y_fun", &capsule->cost_y_fun_{{ jj }}[i_fun]);
+        ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "nls_y_fun_jac", &capsule->cost_y_fun_jac_ut_xt_{{ jj }}[i_fun]);
+        {%- if solver_options.hessian_approx == "EXACT" %}
+        ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "nls_y_hess", &capsule->cost_y_hess_{{ jj }}[i_fun]);
+        {%- endif %}
+    }
+{%- elif cost[jj].cost_type == "CONVEX_OVER_NONLINEAR" %}
+    for (int i = {{ cost_start_idx[jj] }}; i < {{ end_idx[jj] }}; i++)
+    {
+        i_fun = i - {{ cost_start_idx[jj] }};
+        ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "conl_cost_fun", &capsule->conl_cost_fun_{{ jj }}[i_fun]);
+        ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "conl_cost_fun_jac_hess", &capsule->conl_cost_fun_jac_hess_{{ jj }}[i_fun]);
+    }
+{%- elif cost[jj].cost_type == "EXTERNAL" %}
+    for (int i = {{ cost_start_idx[jj] }}; i < {{ end_idx[jj] }}; i++)
+    {
+        i_fun = i - {{ cost_start_idx[jj] }};
+        ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "ext_cost_fun", &capsule->ext_cost_fun_{{ jj }}[i_fun]);
+        ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "ext_cost_fun_jac", &capsule->ext_cost_fun_jac_{{ jj }}[i_fun]);
+        ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "ext_cost_fun_jac_hess", &capsule->ext_cost_fun_jac_hess_{{ jj }}[i_fun]);
+    }
+{%- endif %}
+{%- if model[jj].has_slack_cost_expr.path %}
+    for (int i = {{ cost_start_idx[jj] }}; i < {{ end_idx[jj] }}; i++)
+    {
+        i_fun = i - {{ cost_start_idx[jj] }};
+        ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "slack_penalty_fun_zZ", &capsule->slack_penalty_fun_zZ_{{ jj }}[i_fun]);
+    }
+{%- endif %}
+
+
+    /**** Constraints phase {{ jj }} ****/
+
+{% if phases_dims[jj].nh > 0 %}
+    // set up nonlinear constraints for stage 1 to N-1
+
+    for (int i = {{ cost_start_idx[jj] }}; i < {{ end_idx[jj] }}; i++)
+    {
+        i_fun = i - {{ cost_start_idx[jj] }};
+        ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "nl_constr_h_fun_jac",
+                                      &capsule->nl_constr_h_fun_jac_{{ jj }}[i_fun]);
+        ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "nl_constr_h_fun",
+                                      &capsule->nl_constr_h_fun_{{ jj }}[i_fun]);
+        {% if solver_options.hessian_approx == "EXACT" %}
+        ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i,
+                                      "nl_constr_h_fun_jac_hess", &capsule->nl_constr_h_fun_jac_hess_{{ jj }}[i_fun]);
+        {% endif %}
+        {% if code_gen_options.with_solution_sens_wrt_params_forw %}
+        ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i,
+                                      "nl_constr_h_jac_p_hess_xu_p", &capsule->nl_constr_h_jac_p_hess_xu_p_{{ jj }}[i_fun]);
+        {% endif %}
+        {% if code_gen_options.with_value_sens_wrt_params %}
+        ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i,
+                                      "nl_constr_h_adj_p", &capsule->nl_constr_h_adj_p_{{ jj }}[i_fun]);
+        {% endif %}
+    }
+{%- endif %}
+
+{% if phases_dims[jj].nphi > 0 and constraints[jj].constr_type == "BGP" %}
+    // set up convex-over-nonlinear constraints for stage 1 to N-1
+    for (int i = {{ cost_start_idx[jj] }}; i < {{ end_idx[jj] }}; i++)
+    {
+        i_fun = i - {{ cost_start_idx[jj] }};
+        ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "nl_constr_phi_o_r_fun", &capsule->phi_constraint_fun[i_fun]);
+        ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i,
+                                      "nl_constr_phi_o_r_fun_phi_jac_ux_z_phi_hess_r_jac_ux", &capsule->phi_constraint_fun_jac_hess[i_fun]);
+    }
+{%- endif %}
+{%- endfor %}{# phases loop !#}
+
+    // TERMINAL node
+{%- if cost_e.cost_type_e == "NONLINEAR_LS" %}
+    ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, N, "nls_y_fun", &capsule->cost_y_e_fun);
+    ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, N, "nls_y_fun_jac", &capsule->cost_y_e_fun_jac_ut_xt);
+    {%- if solver_options.hessian_approx == "EXACT" %}
+    ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, N, "nls_y_hess", &capsule->cost_y_e_hess);
+    {%- endif %}
+
+{%- elif cost_e.cost_type_e == "CONVEX_OVER_NONLINEAR" %}
+    ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, N, "conl_cost_fun", &capsule->conl_cost_e_fun);
+    ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, N, "conl_cost_fun_jac_hess", &capsule->conl_cost_e_fun_jac_hess);
+
+{%- elif cost_e.cost_type_e == "EXTERNAL" %}
+    ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, N, "ext_cost_fun", &capsule->ext_cost_e_fun);
+    ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, N, "ext_cost_fun_jac", &capsule->ext_cost_e_fun_jac);
+    ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, N, "ext_cost_fun_jac_hess", &capsule->ext_cost_e_fun_jac_hess);
+{%- endif %}
+{%- if model_e.has_slack_cost_expr.terminal %}
+    ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, N, "slack_penalty_fun_zZ", &capsule->slack_penalty_fun_zZ_e);
+{%- endif %}
+
+    /* terminal constraints */
+{% if dims_e.nh_e > 0 %}
+    // set up nonlinear constraints for last stage
+    ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, N, "nl_constr_h_fun_jac", &capsule->nl_constr_h_e_fun_jac);
+    ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, N, "nl_constr_h_fun", &capsule->nl_constr_h_e_fun);
+    {% if solver_options.hessian_approx == "EXACT" %}
+    ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, N, "nl_constr_h_fun_jac_hess",
+                                  &capsule->nl_constr_h_e_fun_jac_hess);
+    {% endif %}
+    {% if code_gen_options.with_solution_sens_wrt_params_forw %}
+    ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, N, "nl_constr_h_jac_p_hess_xu_p",
+                                  &capsule->nl_constr_h_e_jac_p_hess_xu_p);
+    {% endif %}
+    {% if code_gen_options.with_value_sens_wrt_params %}
+    ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, N, "nl_constr_h_adj_p",
+                                  &capsule->nl_constr_h_e_adj_p);
+    {% endif %}
+{%- elif dims_e.nphi_e > 0 and constraints_e.constr_type_e == "BGP" %}
+    // set up convex-over-nonlinear constraints for last stage
+    ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, N, "nl_constr_phi_o_r_fun", &capsule->phi_e_constraint_fun);
+    ocp_nlp_constraints_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, N,
+                                  "nl_constr_phi_o_r_fun_phi_jac_ux_z_phi_hess_r_jac_ux", &capsule->phi_e_constraint_fun_jac_hess);
+{% endif %}
+}
+
+
 /**
  * Internal function for {{ name }}_acados_create: step 6
  */
@@ -2333,10 +2437,13 @@ void {{ name }}_acados_create_set_opts({{ name }}_solver_capsule* capsule)
     ocp_nlp_solver_opts_set(nlp_config, nlp_opts, "globalization_funnel_use_merit_fun_only", &globalization_funnel_use_merit_fun_only);
 {%- endif %}
 
-    int with_solution_sens_wrt_params = {{ solver_options.with_solution_sens_wrt_params }};
-    ocp_nlp_solver_opts_set(nlp_config, capsule->nlp_opts, "with_solution_sens_wrt_params", &with_solution_sens_wrt_params);
+    int with_solution_sens_wrt_params_forw = {{ code_gen_options.with_solution_sens_wrt_params_forw }};
+    ocp_nlp_solver_opts_set(nlp_config, capsule->nlp_opts, "with_solution_sens_wrt_params_forw", &with_solution_sens_wrt_params_forw);
 
-    int with_value_sens_wrt_params = {{ solver_options.with_value_sens_wrt_params }};
+    int with_solution_sens_wrt_params_adj = {{ code_gen_options.with_solution_sens_wrt_params_adj }};
+    ocp_nlp_solver_opts_set(nlp_config, capsule->nlp_opts, "with_solution_sens_wrt_params_adj", &with_solution_sens_wrt_params_adj);
+
+    int with_value_sens_wrt_params = {{ code_gen_options.with_value_sens_wrt_params }};
     ocp_nlp_solver_opts_set(nlp_config, capsule->nlp_opts, "with_value_sens_wrt_params", &with_value_sens_wrt_params);
 
     double solution_sens_qp_t_lam_min = {{ solver_options.solution_sens_qp_t_lam_min }};
@@ -2517,7 +2624,7 @@ ocp_nlp_solver_opts_set(nlp_config, nlp_opts, "allow_direction_mode_switch_to_no
     double nlp_qp_tol_min_comp = {{ solver_options.nlp_qp_tol_min_comp }};
     ocp_nlp_solver_opts_set(nlp_config, nlp_opts, "nlp_qp_tol_min_comp", &nlp_qp_tol_min_comp);
 
-{%- if solver_options.nlp_solver_type == "SQP" and solver_options.timeout_max_time > 0 %}
+{%- if (solver_options.nlp_solver_type == "SQP" or solver_options.nlp_solver_type == "SQP_WITH_FEASIBLE_QP") and solver_options.timeout_max_time > 0 %}
     double timeout_max_time = {{ solver_options.timeout_max_time }};
     ocp_nlp_solver_opts_set(nlp_config, nlp_opts, "timeout_max_time", &timeout_max_time);
 
@@ -2774,6 +2881,7 @@ int {{ name }}_acados_create_with_discretization({{ name }}_solver_capsule* caps
     // 6) set default parameters in functions
     {{ name }}_acados_create_setup_functions(capsule);
     {{ name }}_acados_create_setup_nlp_in(capsule, N);
+    {{ name }}_acados_create_setup_nlp_in_numerical_values(capsule, N);
     {{ name }}_acados_create_set_default_parameters(capsule);
 
     // 7) create solver
@@ -2794,10 +2902,9 @@ int {{ name }}_acados_create_with_discretization({{ name }}_solver_capsule* caps
 
 
 
-int {{ name }}_acados_reset({{ name }}_solver_capsule* capsule, int reset_qp_solver_mem)
+int {{ name }}_acados_reset({{ name }}_solver_capsule* capsule, int reset_qp_solver_mem, int reset_numerical_values, int reset_solver_options, int reset_x_to_x0_bar)
 {
     // set initialization to all zeros
-{# TODO: use guess values / initial state value from json instead?! #}
     const int N = capsule->nlp_solver_plan->N;
     ocp_nlp_config* nlp_config = capsule->nlp_config;
     ocp_nlp_dims* nlp_dims = capsule->nlp_dims;
@@ -2805,61 +2912,11 @@ int {{ name }}_acados_reset({{ name }}_solver_capsule* capsule, int reset_qp_sol
     ocp_nlp_in* nlp_in = capsule->nlp_in;
     ocp_nlp_solver* nlp_solver = capsule->nlp_solver;
 
-{%- set_global buffer_size = 0 %}
-{%- for jj in range(end=n_phases) %}{# phases loop !#}
-    {%- set buffer_sizes = [
-            phases_dims[jj].nx,
-            phases_dims[jj].nu,
-            phases_dims[jj].nz,
-            2 * phases_dims[jj].ns,
-            2 * phases_dims[jj].ns_0,
-            2 * phases_dims[jj].ns_e,
-            phases_dims[jj].nbx_0,
-            phases_dims[jj].nbx,
-            phases_dims[jj].nbx_e,
-            phases_dims[jj].nbu,
-            phases_dims[jj].ng,
-            phases_dims[jj].ng_e,
-            phases_dims[jj].nh,
-            phases_dims[jj].nh_0,
-            phases_dims[jj].nh_e,
-            phases_dims[jj].nphi,
-            phases_dims[jj].nphi_0,
-            phases_dims[jj].nphi_e,
-        ]
-    -%}
-{%- for b in buffer_sizes %}
-{%- set_global buffer_size = buffer_size + b %}
-{%- endfor %}
-{%- endfor %}
+    // sets primal and dual iterates to zero
+    ocp_nlp_out_set_values_to_zero(nlp_config, nlp_dims, nlp_out);
 
-    double* buffer = calloc({{ buffer_size }}, sizeof(double));
-
-
-{%- for jj in range(end=n_phases) %}{# phases loop !#}
-    // Reset stage {{ jj }}
-    for (int i = {{ start_idx[jj] }}; i < {{ end_idx[jj] }}; i++)
-    {
-        ocp_nlp_out_set(nlp_config, nlp_dims, nlp_out, nlp_in, i, "x", buffer);
-        ocp_nlp_out_set(nlp_config, nlp_dims, nlp_out, nlp_in, i, "u", buffer);
-        ocp_nlp_out_set(nlp_config, nlp_dims, nlp_out, nlp_in, i, "sl", buffer);
-        ocp_nlp_out_set(nlp_config, nlp_dims, nlp_out, nlp_in, i, "su", buffer);
-        ocp_nlp_out_set(nlp_config, nlp_dims, nlp_out, nlp_in, i, "lam", buffer);
-        ocp_nlp_out_set(nlp_config, nlp_dims, nlp_out, nlp_in, i, "z", buffer);
-        if (i<N)
-        {
-            ocp_nlp_out_set(nlp_config, nlp_dims, nlp_out, nlp_in, i, "pi", buffer);
-        {%- if mocp_opts.integrator_type[jj] == "IRK" %}
-            ocp_nlp_set(nlp_solver, i, "xdot_guess", buffer);
-            ocp_nlp_set(nlp_solver, i, "z_guess", buffer);
-        {%- elif mocp_opts.integrator_type[jj] == "LIFTED_IRK" %}
-            ocp_nlp_set(nlp_solver, i, "xdot_guess", buffer);
-        {%- elif mocp_opts.integrator_type[jj] == "GNSF" %}
-            ocp_nlp_set(nlp_solver, i, "gnsf_phi_guess", buffer);
-        {%- endif %}
-        }
-    }
-{%- endfor %}
+    // reset integrator memory
+    ocp_nlp_solver_reset_integrator_memory(nlp_solver, nlp_in, nlp_out);
 
 {%- if solver_options.qp_solver == 'PARTIAL_CONDENSING_HPIPM' %}
     // get qp_status: if NaN -> reset memory
@@ -2870,12 +2927,39 @@ int {{ name }}_acados_reset({{ name }}_solver_capsule* capsule, int reset_qp_sol
         // printf("\nin reset qp_status %d -> resetting QP memory\n", qp_status);
         ocp_nlp_solver_reset_qp_memory(nlp_solver, nlp_in, nlp_out);
     }
-{%- endif %}
+    {%- endif %}
 
-    free(buffer);
+    if (reset_numerical_values)
+    {
+        // reset parameters to initial values
+        {{ name }}_acados_create_set_default_parameters(capsule);
+
+        // reset numerical values in nlp_in
+        {{ name }}_acados_create_setup_nlp_in_numerical_values(capsule, N);
+    }
+
+    if (reset_solver_options)
+    {
+        // reset solver options to initial values
+        {{ name }}_acados_create_set_opts(capsule);
+    }
+
+    if (reset_x_to_x0_bar)
+    {
+        {%- if constraints_0.has_x0 -%}
+        double* buffer = calloc({{ nx_max }}, sizeof(double));
+        ocp_nlp_constraints_model_get(nlp_config, nlp_dims, nlp_in, 0, "lbx", buffer);
+        for (int i=0; i<N+1; i++)
+        {
+            ocp_nlp_out_set(nlp_config, nlp_dims, nlp_out, nlp_in, i, "x", buffer);
+        }
+        free(buffer);
+        {%- else %}
+        // no x0 constraint, cannot reset x to x0_bar
+        {%- endif %}
+    }
     return 0;
 }
-
 
 
 
@@ -3039,6 +3123,9 @@ int {{ name }}_acados_free({{ name }}_solver_capsule* capsule)
     external_function_external_param_{{ cost[0].cost_ext_fun_type_0 }}_free(&capsule->ext_cost_0_fun_jac);
     external_function_external_param_{{ cost[0].cost_ext_fun_type_0 }}_free(&capsule->ext_cost_0_fun_jac_hess);
 {%- endif %}
+{%- if model[0].has_slack_cost_expr.initial %}
+    external_function_external_param_casadi_free(&capsule->slack_penalty_fun_zZ_0);
+{%- endif %}
 
 {%- if constraints_0.constr_type_0 == "BGH" and dims_0.nh_0 > 0 %}
     external_function_external_param_casadi_free(&capsule->nl_constr_h_0_fun_jac);
@@ -3046,10 +3133,10 @@ int {{ name }}_acados_free({{ name }}_solver_capsule* capsule)
 {%- if solver_options.hessian_approx == "EXACT" %}
     external_function_external_param_casadi_free(&capsule->nl_constr_h_0_fun_jac_hess);
 {%- endif %}
-{%- if solver_options.with_solution_sens_wrt_params %}
+{%- if code_gen_options.with_solution_sens_wrt_params_forw %}
     external_function_external_param_casadi_free(&capsule->nl_constr_h_0_jac_p_hess_xu_p);
 {%- endif %}
-{%- if solver_options.with_value_sens_wrt_params %}
+{%- if code_gen_options.with_value_sens_wrt_params %}
     external_function_external_param_casadi_free(&capsule->nl_constr_h_0_adj_p);
 {%- endif %}
 {%- elif constraints_0.constr_type_0 == "BGP" and dims_0.nphi_0 > 0 %}
@@ -3089,7 +3176,7 @@ int {{ name }}_acados_free({{ name }}_solver_capsule* capsule)
     free(capsule->impl_dae_fun_{{ jj }});
     free(capsule->impl_dae_fun_jac_x_xdot_u_{{ jj }});
 
-{%- elif mocp_opts.integrator_type[jj] == "ERK" %}
+{%- elif mocp_opts.integrator_type[jj] is starting_with("ERK") %}
     for (int i_fun = 0; i_fun < {{ end_idx[jj] - start_idx[jj] }}; i_fun++)
     {
         external_function_external_param_casadi_free(&capsule->expl_vde_forw_{{ jj }}[i_fun]);
@@ -3179,6 +3266,11 @@ int {{ name }}_acados_free({{ name }}_solver_capsule* capsule)
     free(capsule->ext_cost_fun_jac_{{ jj }});
     free(capsule->ext_cost_fun_jac_hess_{{ jj }});
 {%- endif %}
+{%- if model[jj].has_slack_cost_expr.path %}
+    for (int i_fun = 0; i_fun < {{ end_idx[jj] - cost_start_idx[jj] }}; i_fun++)
+        external_function_external_param_casadi_free(&capsule->slack_penalty_fun_zZ_{{ jj }}[i_fun]);
+    free(capsule->slack_penalty_fun_zZ_{{ jj }});
+{%- endif %}
 
     // constraints
 {%- if constraints[jj].constr_type == "BGH" and phases_dims[jj].nh > 0 %}
@@ -3189,10 +3281,10 @@ int {{ name }}_acados_free({{ name }}_solver_capsule* capsule)
   {%- if solver_options.hessian_approx == "EXACT" %}
         external_function_external_param_casadi_free(&capsule->nl_constr_h_fun_jac_hess_{{ jj }}[i_fun]);
   {%- endif %}
-  {%- if solver_options.with_solution_sens_wrt_params %}
+  {%- if code_gen_options.with_solution_sens_wrt_params_forw %}
         external_function_external_param_casadi_free(&capsule->nl_constr_h_jac_p_hess_xu_p_{{ jj }}[i_fun]);
   {%- endif %}
-  {%- if solver_options.with_solution_sens_wrt_params %}
+  {%- if code_gen_options.with_value_sens_wrt_params %}
         external_function_external_param_casadi_free(&capsule->nl_constr_h_adj_p_{{ jj }}[i_fun]);
   {%- endif %}
     }
@@ -3201,10 +3293,10 @@ int {{ name }}_acados_free({{ name }}_solver_capsule* capsule)
   {%- if solver_options.hessian_approx == "EXACT" %}
     free(capsule->nl_constr_h_fun_jac_hess_{{ jj }});
   {%- endif %}
-  {%- if solver_options.with_solution_sens_wrt_params %}
+  {%- if code_gen_options.with_solution_sens_wrt_params_forw %}
     free(capsule->nl_constr_h_jac_p_hess_xu_p_{{ jj }});
   {%- endif %}
-  {%- if solver_options.with_solution_sens_wrt_params %}
+  {%- if code_gen_options.with_value_sens_wrt_params %}
     free(capsule->nl_constr_h_adj_p_{{ jj }});
   {%- endif %}
 
@@ -3227,10 +3319,10 @@ int {{ name }}_acados_free({{ name }}_solver_capsule* capsule)
 {%- if solver_options.hessian_approx == "EXACT" %}
     external_function_external_param_casadi_free(&capsule->nl_constr_h_e_fun_jac_hess);
 {%- endif %}
-{%- if solver_options.with_solution_sens_wrt_params %}
+{%- if code_gen_options.with_solution_sens_wrt_params_forw %}
     external_function_external_param_casadi_free(&capsule->nl_constr_h_e_jac_p_hess_xu_p);
 {%- endif %}
-{%- if solver_options.with_value_sens_wrt_params %}
+{%- if code_gen_options.with_value_sens_wrt_params %}
     external_function_external_param_casadi_free(&capsule->nl_constr_h_e_adj_p);
 {%- endif %}
 {%- elif constraints_e.constr_type_e == "BGP" and dims_e.nphi_e > 0 %}
@@ -3251,6 +3343,9 @@ int {{ name }}_acados_free({{ name }}_solver_capsule* capsule)
     external_function_external_param_{{ cost_e.cost_ext_fun_type_e }}_free(&capsule->ext_cost_e_fun);
     external_function_external_param_{{ cost_e.cost_ext_fun_type_e }}_free(&capsule->ext_cost_e_fun_jac);
     external_function_external_param_{{ cost_e.cost_ext_fun_type_e }}_free(&capsule->ext_cost_e_fun_jac_hess);
+{%- endif %}
+{%- if model_e.has_slack_cost_expr.terminal %}
+    external_function_external_param_casadi_free(&capsule->slack_penalty_fun_zZ_e);
 {%- endif %}
 
 {% if phases_dims[0].n_global_data > 0 %}

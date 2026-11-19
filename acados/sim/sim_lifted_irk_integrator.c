@@ -3,29 +3,7 @@
  *
  * This file is part of acados.
  *
- * The 2-Clause BSD License
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright notice,
- * this list of conditions and the following disclaimer.
- *
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- * this list of conditions and the following disclaimer in the documentation
- * and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.;
+ * Licensed under the 2-Clause BSD License.
  */
 
 
@@ -191,54 +169,6 @@ int sim_lifted_irk_model_set(void *model_, const char *field, void *value)
 /************************************************
 * opts
 ************************************************/
-
-acados_size_t sim_lifted_irk_opts_calculate_size(void *config_, void *dims)
-{
-    int ns_max = NS_MAX;
-
-    acados_size_t size = 0;
-
-    size += sizeof(sim_opts);
-
-    size += ns_max * ns_max * sizeof(double);  // A_mat
-    size += ns_max * sizeof(double);           // b_vec
-    size += ns_max * sizeof(double);           // c_vec
-
-    size += butcher_tableau_work_calculate_size(ns_max);
-
-    make_int_multiple_of(8, &size);
-    size += 1 * 8;
-
-    return size;
-}
-
-
-
-void *sim_lifted_irk_opts_assign(void *config_, void *dims, void *raw_memory)
-{
-    int ns_max = NS_MAX;
-
-    char *c_ptr = (char *) raw_memory;
-
-    sim_opts *opts = (sim_opts *) c_ptr;
-    c_ptr += sizeof(sim_opts);
-
-    align_char_to(8, &c_ptr);
-
-    // work
-    opts->work = c_ptr;
-    c_ptr += butcher_tableau_work_calculate_size(ns_max);
-
-    assign_and_advance_double(ns_max * ns_max, &opts->A_mat, &c_ptr);
-    assign_and_advance_double(ns_max, &opts->b_vec, &c_ptr);
-    assign_and_advance_double(ns_max, &opts->c_vec, &c_ptr);
-
-    assert((char *) raw_memory + sim_lifted_irk_opts_calculate_size(config_, dims) >= c_ptr);
-
-    return (void *) opts;
-}
-
-
 
 void sim_lifted_irk_opts_initialize_default(void *config_, void *dims_, void *opts_)
 {
@@ -466,7 +396,7 @@ int sim_lifted_irk_memory_set(void *config_, void *dims_, void *mem_, const char
 
 
 
-int sim_lifted_irk_memory_set_to_zero(void *config_, void * dims_, void *opts_, void *mem_, const char *field)
+int sim_lifted_irk_memory_set_to_zero(void *config_, void * dims_, void *opts_, void *mem_)
 {
     sim_config *config = config_;
     sim_lifted_irk_memory *mem = (sim_lifted_irk_memory *) mem_;
@@ -474,20 +404,10 @@ int sim_lifted_irk_memory_set_to_zero(void *config_, void * dims_, void *opts_, 
 
     int status = ACADOS_SUCCESS;
 
-    if (!strcmp(field, "guesses"))
-    {
-        int nx;
-        config->dims_get(config_, dims_, "nx", &nx);
-        for (int i = 0; i < opts->num_steps; i++)
-        {
-            blasfeo_dvecse(nx * opts->ns, 0.0, &mem->K[i], 0);
-        }
-    }
-    else
-    {
-        printf("sim_lifted_irk_memory_set_to_zero field %s is not supported! \n", field);
-        exit(1);
-    }
+    int nx;
+    config->dims_get(config_, dims_, "nx", &nx);
+    for (int i = 0; i < opts->num_steps; i++)
+        blasfeo_dvecse(nx * opts->ns, 0.0, &mem->K[i], 0);
 
     return status;
 }
@@ -964,7 +884,7 @@ int sim_lifted_irk(void *config_, sim_in *in, sim_out *out, void *opts_, void *m
 
         // solve linear system
         acados_tic(&timer_la);
-        blasfeo_drowpe(nx * ns, ipiv, &JKf[ss]);
+        blasfeo_drowpe(nx * ns, ipiv, nx + nu, &JKf[ss], 0, 0);
         blasfeo_dtrsm_llnu(nx * ns, nx + nu, 1.0, JGK, 0, 0, &JKf[ss], 0, 0, &JKf[ss], 0, 0);
         blasfeo_dtrsm_lunn(nx * ns, nx + nu, 1.0, JGK, 0, 0, &JKf[ss], 0, 0, &JKf[ss], 0, 0);
         out->info->LAtime += acados_toc(&timer_la);
@@ -1003,8 +923,8 @@ void sim_lifted_irk_config_initialize_default(void *config_)
 
     config->evaluate = &sim_lifted_irk;
     config->precompute = &sim_lifted_irk_precompute;
-    config->opts_calculate_size = &sim_lifted_irk_opts_calculate_size;
-    config->opts_assign = &sim_lifted_irk_opts_assign;
+    config->opts_calculate_size = &sim_opts_calculate_size;
+    config->opts_assign = &sim_opts_assign;
     config->opts_initialize_default = &sim_lifted_irk_opts_initialize_default;
     config->opts_update = &sim_lifted_irk_opts_update;
     config->opts_set = &sim_lifted_irk_opts_set;

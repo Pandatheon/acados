@@ -3,29 +3,7 @@
  *
  * This file is part of acados.
  *
- * The 2-Clause BSD License
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright notice,
- * this list of conditions and the following disclaimer.
- *
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- * this list of conditions and the following disclaimer in the documentation
- * and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.;
+ * Licensed under the 2-Clause BSD License.
  */
 
 
@@ -107,6 +85,7 @@ typedef struct
     external_function_generic *nl_constr_h_fun_jac;  // nonlinear: lh <= h(x,u) <= uh
     external_function_generic *nl_constr_h_fun_jac_hess;  // nonlinear: lh <= h(x,u) <= uh
     external_function_generic *nl_constr_h_jac_p_hess_xu_p;
+    external_function_generic *nl_constr_h_hess_ux_pdiff_adj_pdiff;
     external_function_generic *nl_constr_h_adj_p;
 } ocp_nlp_constraints_bgh_model;
 
@@ -131,7 +110,8 @@ typedef struct
 {
     int compute_adj;
     int compute_hess;
-    int with_solution_sens_wrt_params;
+    int with_solution_sens_wrt_params_forw;
+    int with_solution_sens_wrt_params_adj;
 } ocp_nlp_constraints_bgh_opts;
 
 //
@@ -164,6 +144,11 @@ typedef struct
     struct blasfeo_dmat *DCt;    // pointer to DCt in qp_in
     struct blasfeo_dmat *RSQrq;  // pointer to RSQrq in qp_in
     struct blasfeo_dmat *dzduxt; // pointer to dzduxt in ocp_nlp memory
+    struct blasfeo_dvec *seed_ux;     // pointer to seed in ocp_nlp memory
+    struct blasfeo_dvec *seed_lam;     // pointer to seed in ocp_nlp memory
+    struct blasfeo_dvec *adj_lag_p_global;
+    struct blasfeo_dvec *orphan_mask;  // pointer to orphan_mask in ocp_nlp memory
+
     int *idxb;                   // pointer to idxb[ii] in qp_in
     int *idxs_rev;               // pointer to idxs_rev[ii] in qp_in
     int *idxe;                   // pointer to idxe[ii] in qp_in
@@ -178,28 +163,8 @@ struct blasfeo_dvec *ocp_nlp_constraints_bgh_memory_get_fun_ptr(void *memory_);
 //
 struct blasfeo_dvec *ocp_nlp_constraints_bgh_memory_get_adj_ptr(void *memory_);
 //
-void ocp_nlp_constraints_bgh_memory_set_ux_ptr(struct blasfeo_dvec *ux, void *memory_);
+void ocp_nlp_constraints_bgh_memory_set(void *config_, void *dims_, void *memory_, const char *field, void *value);
 //
-void ocp_nlp_constraints_bgh_memory_set_lam_ptr(struct blasfeo_dvec *lam, void *memory_);
-//
-void ocp_nlp_constraints_bgh_memory_set_DCt_ptr(struct blasfeo_dmat *DCt, void *memory);
-//
-void ocp_nlp_constraints_bgh_memory_set_RSQrq_ptr(struct blasfeo_dmat *RSQrq, void *memory_);
-//
-void ocp_nlp_constraints_bgh_memory_set_z_alg_ptr(struct blasfeo_dvec *z_alg, void *memory_);
-//
-void ocp_nlp_constraints_bgh_memory_set_dzduxt_ptr(struct blasfeo_dmat *dzduxt, void *memory_);
-//
-void ocp_nlp_constraints_bgh_memory_set_idxb_ptr(int *idxb, void *memory_);
-//
-void ocp_nlp_constraints_bgh_memory_set_idxs_rev_ptr(int *idxs_rev, void *memory_);
-//
-void ocp_nlp_constraints_bgh_memory_set_idxe_ptr(int *idxe, void *memory_);
-//
-void ocp_nlp_constraints_bgh_memory_set_jac_lag_stat_p_global_ptr(struct blasfeo_dmat *jac_lag_stat_p_global, void *memory_);
-//
-void ocp_nlp_constraints_bgh_memory_set_jac_ineq_p_global_ptr(struct blasfeo_dmat *jac_ineq_p_global, void *memory_);
-
 
 
 /************************************************
@@ -216,6 +181,8 @@ typedef struct
     struct blasfeo_dmat hess_z;
     struct blasfeo_dvec tmp_ni;
     struct blasfeo_dvec tmp_nh;
+    struct blasfeo_dvec tmp_nh_seed;
+    struct blasfeo_dvec tmp_np_global;
 } ocp_nlp_constraints_bgh_workspace;
 
 //

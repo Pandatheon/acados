@@ -3,34 +3,15 @@
  *
  * This file is part of acados.
  *
- * The 2-Clause BSD License
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright notice,
- * this list of conditions and the following disclaimer.
- *
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- * this list of conditions and the following disclaimer in the documentation
- * and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.;
+ * Licensed under the 2-Clause BSD License.
  */
 
 
 #include <assert.h>
 #include <string.h>
+
+// blasfeo
+#include "blasfeo_d_blasfeo_api.h"
 
 // clarabel
 #include "Clarabel.cpp/include/clarabel.h"
@@ -504,6 +485,7 @@ static void update_constraints_matrix_data(const ocp_qp_in *in, ocp_qp_clarabel_
     int ii, jj, kk;
 
 
+    // entries of inequality rows are multiplied by their mask, see update_bounds for masked rows
     // Traverse matrix in column-major order
     int nn = 0;
     for (kk = 0; kk <= N; kk++)
@@ -523,9 +505,9 @@ static void update_constraints_matrix_data(const ocp_qp_in *in, ocp_qp_clarabel_
             {
                 if (in->idxb[kk][ii] == jj)
                 {
-                    mem->A_nzval[nn] = -1.0; // lower bound
+                    mem->A_nzval[nn] = -BLASFEO_DVECEL(in->d_mask+kk, ii); // lower bound
                     nn++;
-                    mem->A_nzval[nn] = 1.0; // upper bound
+                    mem->A_nzval[nn] = BLASFEO_DVECEL(in->d_mask+kk, nb[kk]+ng[kk]+ii); // upper bound
                     nn++;
                     break;
                 }
@@ -535,7 +517,8 @@ static void update_constraints_matrix_data(const ocp_qp_in *in, ocp_qp_clarabel_
             blasfeo_unpack_dmat(1, ng[kk], in->DCt+kk, jj, 0, mem->A_nzval+nn+ng[kk], 1);
             for (ii=0; ii<ng[kk]; ii++)
             {
-                mem->A_nzval[nn+ii] = - mem->A_nzval[nn+ng[kk]+ii];
+                mem->A_nzval[nn+ii] = - mem->A_nzval[nn+ng[kk]+ii] * BLASFEO_DVECEL(in->d_mask+kk, nb[kk]+ii);
+                mem->A_nzval[nn+ng[kk]+ii] *= BLASFEO_DVECEL(in->d_mask+kk, 2*nb[kk]+ng[kk]+ii);
             }
             nn += 2*ng[kk];
         }
@@ -562,9 +545,9 @@ static void update_constraints_matrix_data(const ocp_qp_in *in, ocp_qp_clarabel_
             {
                 if (in->idxb[kk][ii] == nu[kk] + jj)
                 {
-                    mem->A_nzval[nn] = -1.0; // lower bound
+                    mem->A_nzval[nn] = -BLASFEO_DVECEL(in->d_mask+kk, ii); // lower bound
                     nn++;
-                    mem->A_nzval[nn] = 1.0; // upper bound
+                    mem->A_nzval[nn] = BLASFEO_DVECEL(in->d_mask+kk, nb[kk]+ng[kk]+ii); // upper bound
                     nn++;
                     break;
                 }
@@ -574,7 +557,8 @@ static void update_constraints_matrix_data(const ocp_qp_in *in, ocp_qp_clarabel_
             blasfeo_unpack_dmat(1, ng[kk], in->DCt+kk, nu[kk]+jj, 0, mem->A_nzval+nn+ng[kk], 1);
             for (ii=0; ii<ng[kk]; ii++)
             {
-                mem->A_nzval[nn+ii] = - mem->A_nzval[nn+ng[kk]+ii];
+                mem->A_nzval[nn+ii] = - mem->A_nzval[nn+ng[kk]+ii] * BLASFEO_DVECEL(in->d_mask+kk, nb[kk]+ii);
+                mem->A_nzval[nn+ng[kk]+ii] *= BLASFEO_DVECEL(in->d_mask+kk, 2*nb[kk]+ng[kk]+ii);
             }
             nn += 2*ng[kk];
 
@@ -589,14 +573,14 @@ static void update_constraints_matrix_data(const ocp_qp_in *in, ocp_qp_clarabel_
                 if (in->idxs_rev[kk][ii]==jj)
                 {
                     //mem->A_nzval[nn] = 1.0;
-                    mem->A_nzval[nn] = -1.0;
+                    mem->A_nzval[nn] = -BLASFEO_DVECEL(in->d_mask+kk, ii);
                     nn++;
                     // no break, there could possibly be multiple
                 }
             }
 
             // nonnegativity constraint
-            mem->A_nzval[nn] = -1.0; //1.0;
+            mem->A_nzval[nn] = -BLASFEO_DVECEL(in->d_mask+kk, 2*nb[kk]+2*ng[kk]+jj);
             nn++;
         }
 
@@ -609,14 +593,14 @@ static void update_constraints_matrix_data(const ocp_qp_in *in, ocp_qp_clarabel_
                 if (in->idxs_rev[kk][ii]==jj)
                 {
                     //mem->A_nzval[nn] = 1.0; //-1.0;
-                    mem->A_nzval[nn] = -1.0; //-1.0;
+                    mem->A_nzval[nn] = -BLASFEO_DVECEL(in->d_mask+kk, nb[kk]+ng[kk]+ii);
                     nn++;
                     // no break, there could possibly be multiple
                 }
             }
 
             // nonnegativity constraint
-            mem->A_nzval[nn] = -1.0; //1.0;
+            mem->A_nzval[nn] = -BLASFEO_DVECEL(in->d_mask+kk, 2*nb[kk]+2*ng[kk]+ns[kk]+jj);
             nn++;
         }
 
@@ -663,6 +647,14 @@ static void update_bounds(const ocp_qp_in *in, ocp_qp_clarabel_memory *mem)
         {
             mem->b[nn+ii] = - mem->b[nn+ii];
         }
+        // masked rows have zero coefficients, with b = 1 they read s = 1, i.e. they are always satisfied
+        for (ii = 0; ii < 2*nb[kk]+2*ng[kk]; ii++)
+        {
+            if (BLASFEO_DVECEL(in->d_mask+kk, ii) == 0.0)
+            {
+                mem->b[nn+ii] = 1.0;
+            }
+        }
         nn += 2*nb[kk] + 2*ng[kk];
     }
 
@@ -674,6 +666,14 @@ static void update_bounds(const ocp_qp_in *in, ocp_qp_clarabel_memory *mem)
         for (ii = 0; ii < 2*ns[kk]; ii++)
         {
             mem->b[nn+ii] = - mem->b[nn+ii];
+        }
+        // masked rows
+        for (ii = 0; ii < 2*ns[kk]; ii++)
+        {
+            if (BLASFEO_DVECEL(in->d_mask+kk, 2*nb[kk]+2*ng[kk]+ii) == 0.0)
+            {
+                mem->b[nn+ii] = 1.0;
+            }
         }
         nn += 2*ns[kk];
     }
@@ -1068,6 +1068,12 @@ static void fill_in_qp_out(const ocp_qp_in *in, ocp_qp_out *out, ocp_qp_clarabel
     {
         blasfeo_pack_dvec(2*ns[kk], &sol->z[nn], 1, out->lam+kk, 2*nb[kk]+2*ng[kk]);
         nn += 2*ns[kk];
+    }
+
+    // multiply with mask to ensure that multipliers associated with masked constraints are zero
+    for (kk = 0; kk <= N; kk++)
+    {
+        blasfeo_dvecmul(2*(nb[kk]+ng[kk]+ns[kk]), in->d_mask+kk, 0, out->lam+kk, 0, out->lam+kk, 0);
     }
 }
 

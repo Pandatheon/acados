@@ -3,29 +3,7 @@
 %
 % This file is part of acados.
 %
-% The 2-Clause BSD License
-%
-% Redistribution and use in source and binary forms, with or without
-% modification, are permitted provided that the following conditions are met:
-%
-% 1. Redistributions of source code must retain the above copyright notice,
-% this list of conditions and the following disclaimer.
-%
-% 2. Redistributions in binary form must reproduce the above copyright notice,
-% this list of conditions and the following disclaimer in the documentation
-% and/or other materials provided with the distribution.
-%
-% THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-% AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-% IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-% ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-% LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-% CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-% SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-% INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-% CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-% ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-% POSSIBILITY OF SUCH DAMAGE.;
+% Licensed under the 2-Clause BSD License.
 
 %
 
@@ -42,6 +20,7 @@ classdef AcadosModel < handle
         t
         f_impl_expr
         f_expl_expr
+        f_expl_expr_with_cost
         disc_dyn_expr
         disc_dyn_custom_jac_ux_expr
         disc_dyn_custom_hess_ux_expr
@@ -134,6 +113,7 @@ classdef AcadosModel < handle
 
             obj.f_impl_expr = [];
             obj.f_expl_expr = [];
+            obj.f_expl_expr_with_cost = [];
             obj.disc_dyn_expr = [];
             obj.disc_dyn_custom_jac_ux_expr = [];
             obj.disc_dyn_custom_hess_ux_expr = [];
@@ -309,6 +289,16 @@ classdef AcadosModel < handle
                     error(sprintf('model.f_expl_expr must have length nx = %d, got %d', dims.nx, length(obj.f_expl_expr)));
                 end
             end
+
+            if ~isempty(obj.f_expl_expr_with_cost)
+                if length(obj.f_expl_expr_with_cost) ~= (dims.nx + 1)
+                    error(sprintf('model.f_expl_expr_with_cost must have length nx+1 = %d, got %d', dims.nx + 1, length(obj.f_expl_expr_with_cost)));
+                end
+            end
+
+            if isempty(obj.name)
+                error("model.name cannot be empty")
+            end
         end
 
         function substitute(self, var, expr_new)
@@ -351,8 +341,25 @@ classdef AcadosModel < handle
                     end
                 else
                     % TODO: clean this up when GNSF is migrated!
-                    % nested GnsfModel support if present (best-effort)
-                    if ~isempty(v) && isobject(v) && ismethod(v, 'to_struct')
+                    if strcmp(name, 'gnsf_model')
+                        m.gnsf_model = struct();
+
+                        if ~isempty(self.gnsf_model)
+
+                            if isfield(self.gnsf_model, 'dims')
+                                m.gnsf_model.dims = self.gnsf_model.dims;
+                            end
+                            gnsf_fields = fieldnames(self.gnsf_model);
+                            num_fields = length(gnsf_fields);
+                            for n=1:num_fields
+                                f = gnsf_fields{n};
+                                v = self.gnsf_model.(f);
+                                if ~strcmp(f, 'dims') && ~(isa(v, 'casadi.SX') || isa(v, 'casadi.MX'))
+                                    m.gnsf_model.(f) = v;
+                                end
+                            end
+                        end
+                    elseif ~isempty(v) && isobject(v) && ismethod(v, 'to_struct')
                         try
                             m.(name) = v.to_struct();
                         catch
@@ -405,6 +412,12 @@ classdef AcadosModel < handle
                     % Ignore if property cannot be set
                 end
             end
+        end
+
+        function new_obj = copy(self)
+            % Create a deep copy of this AcadosModel object.
+            % Necessary because AcadosModel is a handle class.
+            new_obj = AcadosModel.from_struct(self.to_struct());
         end
     end
     methods (Static)

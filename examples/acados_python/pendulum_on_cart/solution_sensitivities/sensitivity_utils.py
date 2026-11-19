@@ -3,35 +3,12 @@
 #
 # This file is part of acados.
 #
-# The 2-Clause BSD License
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#
-# 1. Redistributions of source code must retain the above copyright notice,
-# this list of conditions and the following disclaimer.
-#
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-# this list of conditions and the following disclaimer in the documentation
-# and/or other materials provided with the distribution.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-# POSSIBILITY OF SUCH DAMAGE.;
-#
+# Licensed under the 2-Clause BSD License.
 
 import numpy as np
 import casadi as ca
 import matplotlib.pyplot as plt
-from acados_template import AcadosModel, AcadosOcp, AcadosOcpSolver, latexify_plot
+from acados_template import AcadosModel, AcadosOcp, AcadosOcpSolver, latexify_plot, get_acados_colors
 
 latexify_plot()
 
@@ -180,8 +157,9 @@ def export_parametric_ocp(
 
     # if hessian_approx == 'EXACT':
         # sensitivity solver settings!
-    ocp.solver_options.with_solution_sens_wrt_params = True
-    ocp.solver_options.with_value_sens_wrt_params = True
+    ocp.code_gen_options.with_solution_sens_wrt_params_forw = True
+    ocp.code_gen_options.with_solution_sens_wrt_params_adj = True
+    ocp.code_gen_options.with_value_sens_wrt_params = True
 
     return ocp
 
@@ -331,6 +309,8 @@ def plot_smoothed_solution_sensitivities_results(p_test, pi_label_pairs, sens_pi
                  figsize=None,
                  fig_filename=None,
                  horizontal_plot=False,
+                 plt_show=True,
+                 use_acados_colors=False,
                  ):
 
     nsub = 2
@@ -342,15 +322,17 @@ def plot_smoothed_solution_sensitivities_results(p_test, pi_label_pairs, sens_pi
     if figsize is None:
         figsize = (9, 9)
     if not horizontal_plot:
-        _, ax = plt.subplots(nrows=nsub, ncols=1, sharex=True, figsize=figsize)
+        fig, ax = plt.subplots(nrows=nsub, ncols=1, sharex=True, figsize=figsize)
     else:
-        _, ax = plt.subplots(nrows=1, ncols=nsub, sharex=False, figsize=figsize)
+        fig, ax = plt.subplots(nrows=1, ncols=nsub, sharex=False, figsize=figsize)
 
     linestyles = ["-", "--", "-.", ":", "-", "--", "-.", ":"]
+    num_colors = max(len(pi_label_pairs), len(sens_pi_label_pairs), 1)
+    colors = get_acados_colors(num_colors) if use_acados_colors else [f"C{n}" for n in range(num_colors)]
 
     isub = 0
-    for i, (pi, label) in enumerate(pi_label_pairs):
-        ax[isub].plot(p_test, pi, label=label, linestyle=linestyles[i])
+    for (pi, label), color, linestyle in zip(pi_label_pairs, colors, linestyles):
+        ax[isub].plot(p_test, pi, label=label, linestyle=linestyle, color=color)
     ax[isub].set_ylabel(r"$u_0$")
     if title is not None:
         ax[isub].set_title(title)
@@ -358,13 +340,13 @@ def plot_smoothed_solution_sensitivities_results(p_test, pi_label_pairs, sens_pi
     ax[isub].legend(handlelength=1.2)
 
     isub += 1
-    for i, (sens_pi, label) in enumerate(sens_pi_label_pairs):
-        ax[isub].plot(p_test, sens_pi, label=label, linestyle=linestyles[i])
+    for (sens_pi, label), color, linestyle in zip(sens_pi_label_pairs, colors, linestyles):
+        ax[isub].plot(p_test, sens_pi, label=label, linestyle=linestyle, color=color)
     ax[isub].set_ylabel(r"$\partial_\theta u_0$")
     if horizontal_plot:
-        ax[isub].legend(loc = 'upper left', handlelength=1.2, ncol=2, columnspacing=0.5, labelspacing=0.2)
+        ax[isub].legend(loc='upper left', handlelength=1.2, ncol=2, columnspacing=0.5, labelspacing=0.2)
     else:
-        ax[isub].legend(loc = 'upper left', handlelength=1.2)
+        ax[isub].legend(loc='upper left', handlelength=1.2)
 
     if with_multiplier_subplot:
         isub += 1
@@ -397,7 +379,9 @@ def plot_smoothed_solution_sensitivities_results(p_test, pi_label_pairs, sens_pi
     if fig_filename is not None:
         plt.savefig(fig_filename)
         print(f"stored figure as {fig_filename}")
-    plt.show()
+    if plt_show:
+        plt.show()
+    return fig, ax
 
 
 

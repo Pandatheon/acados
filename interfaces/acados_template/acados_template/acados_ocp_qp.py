@@ -25,24 +25,28 @@ class AcadosOcpQp:
     Class containing the description of an OCP-structured QP problem
 
     The QP has the following structure:
-        min \sum_{i=0}^{N} (1/2) [u_i; x_i]^\top [R_i, S_i; S_i^\top, Q_i] [u_i; x_i] + [r_i; q_i]^\top [u_i; x_i] \
-            + 1/2 [s_i^l; s_i^u]^\top [Z_i^l, 0; 0, Z_i^u] [s_i^l; s_i^u] + [z_i^l; z_i^u]^\top [s_i^l; s_i^u]
-        s.t.
-            x_{i+1} = A_i x_i + B_i u_i + b_i,  i = 0, ..., N-1
-            [lbu_i; lbx_i, lg_i] <= [[u_i; x_i][idxb_i]; C_i x_i + D_i u_i] + s_^{l,select}_i, i = 0, ..., N
-            [[u_i; x_i][idxb_i]; C_i x_i + D_i u_i] + s_^{l,select}_i, i = 0, ..., N <= [ubu_i; ubx_i, ug_i]
-            s^l_i >= lls_i, s^u_i >= lus_i, i = 0, ..., N
 
-        with s_^{l,select}_i, (s_^{u,select}_i) being the selected components of s_i^l, (s_i^u) according to idxs_rev_i
-        idxs_rev_i has length [nb_i + ng_i] and contains the indices of the slack variables associated with each constraint.
-        If a constraint does not have a slack variable, the corresponding entry in idxs_rev_i is set to -1.
+    .. math::
 
-        In addition, some of the bound constraints can be marked as equalities using idxe_i.
-        NOTE: only x bounds can be marked as equalities for now.
+       \begin{aligned}
+       \min \quad & \sum_{i=0}^{N} \frac{1}{2} [u_i; x_i]^\top \begin{bmatrix} R_i & S_i \\ S_i^\top & Q_i \end{bmatrix} [u_i; x_i] + [r_i; q_i]^\top [u_i; x_i] \\
+       & + \frac{1}{2} [s_i^l; s_i^u]^\top \begin{bmatrix} Z_i^l & 0 \\ 0 & Z_i^u \end{bmatrix} [s_i^l; s_i^u] + [z_i^l; z_i^u]^\top [s_i^l; s_i^u] \\[1ex]
+       \mbox{s.t.} \quad & x_{i+1} = A_i x_i + B_i u_i + b_i, \quad i = 0, \dots, N-1 \\
+       & \begin{bmatrix} \text{lbu}_i \\ \text{lbx}_i \\ \text{lg}_i \end{bmatrix} \leq \begin{bmatrix} [u_i; x_i][\text{idxb}_i] \\ C_i x_i + D_i u_i \end{bmatrix} + s_{i}^{l,\text{select}}, \quad i = 0, \dots, N \\
+       & \begin{bmatrix} [u_i; x_i][\text{idxb}_i] \\ C_i x_i + D_i u_i \end{bmatrix} + s_{i}^{l,\text{select}}, \quad i = 0, \dots, N \leq \begin{bmatrix} \text{ubu}_i \\ \text{ubx}_i \\ \text{ug}_i \end{bmatrix} \\
+       & s^l_i \geq \text{lls}_i, \quad s^u_i \geq \text{lus}_i, \quad i = 0, \dots, N
+       \end{aligned}
 
-        Masks (*_mask) have default values 1.0, a corresponding constraint can be deactivated by setting the mask to 0.0.
+    where :math:`s_{i}^{l,\text{select}}` and :math:`s_{i}^{u,\text{select}}` are the selected components of :math:`s_i^l` and :math:`s_i^u` according to ``idxs_rev_i``.
+    ``idxs_rev_i`` has length ``nb_i + ng_i`` and contains the indices of the slack variables associated with each constraint.
+    If a constraint does not have a slack variable, the corresponding entry in ``idxs_rev_i`` is set to -1.
 
+    In addition, some of the bound constraints can be marked as equalities using ``idxe_i``.
+    NOTE: only x bounds can be marked as equalities for now.
+
+    Masks (``*_mask``) have default values 1.0, a corresponding constraint can be deactivated by setting the mask to 0.0.
     """
+
     def __init__(self, N: int):
         self.__N = N
         # dynamics
@@ -296,6 +300,17 @@ class AcadosOcpQp:
         nx_next = None
 
         for i in range(self.N+1):
+
+            # replace None entries with empty numpy arrays
+            for field in self.all_fields:
+                if field in self.dynamics_fields and i == self.N:
+                    continue  # skip dynamics fields at terminal stage
+                if getattr(self, field)[i] is None:
+                    if field in self.vector_fields:
+                        self.set(field, i, np.zeros((0,)))
+                    elif field in self.matrix_fields:
+                        self.set(field, i, np.zeros((0,0)))
+
             # cost
             nx = self.Q[i].shape[0]
             nu = self.R[i].shape[0]
@@ -445,14 +460,15 @@ class AcadosOcpQp:
         Compute some diagnostic values for the last QP.
         result = ocp_solver.qp_diagnostics(hessian_type).
 
-        returns a dictionary with the following fields:
-        - min_eigv_stage: dict with minimum eigenvalue for each Hessian block.
-        - max_eigv_stage: dict with maximum eigenvalue for each Hessian block.
-        - condition_number_stage: dict with condition number for each Hessian block.
-        - condition_number_global: condition number for the full Hessian.
-        - min_eigv_global: minimum eigenvalue for the full Hessian.
-        - min_abs_eigv_global: minimum absolute eigenvalue for the full Hessian.
-        - max_eigv_global: maximum eigenvalue for the full Hessian.
+        Returns a dictionary with the following fields:
+
+        * ``min_eigv_stage``: dict with minimum eigenvalue for each Hessian block.
+        * ``max_eigv_stage``: dict with maximum eigenvalue for each Hessian block.
+        * ``condition_number_stage``: dict with condition number for each Hessian block.
+        * ``condition_number_global``: condition number for the full Hessian.
+        * ``min_eigv_global``: minimum eigenvalue for the full Hessian.
+        * ``min_abs_eigv_global``: minimum absolute eigenvalue for the full Hessian.
+        * ``max_eigv_global``: maximum eigenvalue for the full Hessian.
         """
 
         qp_diagnostic = {}
@@ -497,71 +513,52 @@ class AcadosOcpQp:
         return qp_diagnostic
 
 
-    def check_licq(self, iterate: AcadosOcpIterate) -> bool:
-        '''
-        Check the Linear Independence Constraint Qualification (LICQ) condition at the provided primal-dual iterate.
+    def check_licq(self, iterate: AcadosOcpIterate, tol: float = 1e-8) -> bool:
+        N = self.N
+        nx, nu = self.dims.nx, self.dims.nu
 
-        NOTE: slack variables and masked constraints are not considered in this check yet.
-        '''
+        # global primal vector w = [u_0; x_0; u_1; x_1; ...; x_N]
+        off = np.concatenate([[0], np.cumsum(nu + nx)])
+        n_w = off[-1]
 
-        horizon = self.N
+        def is_active(v, bound):
+            return np.abs(v - bound) <= tol * max(1.0, abs(bound))
 
-        # for each stage, collect the gradients of the active constraints
-        for i in range(horizon):
-            nx = self.dims.nx[i]
-            nu = self.dims.nu[i]
+        rows = []
+        # dynamics: A_i x_i + B_i u_i - x_{i+1} = 0, always active
+        for i in range(N):
+            J = np.zeros((nx[i+1], n_w))
+            J[:, off[i]:off[i]+nu[i]] = self.B[i]
+            J[:, off[i]+nu[i]:off[i+1]] = self.A[i]
+            J[:, off[i+1]+nu[i+1]:off[i+2]] = -np.eye(nx[i+1])
+            rows.append(J)
+
+        for i in range(N + 1):
+            u_i = iterate.u[i] if nu[i] > 0 else np.zeros(0)
+            ux = np.concatenate([u_i, iterate.x[i]])
+
+            # bounds: idxb indexes into [u_i; x_i], u bounds first, then x bounds
+            lb = np.concatenate([self.lbu[i], self.lbx[i]])
+            ub = np.concatenate([self.ubu[i], self.ubx[i]])
+            for k, idx in enumerate(self.idxb[i]):
+                if is_active(ux[idx], lb[k]) or is_active(ux[idx], ub[k]):
+                    J = np.zeros((1, n_w))
+                    J[0, off[i] + idx] = 1.0
+                    rows.append(J)
+
+            # general constraints: lg <= C_i x_i + D_i u_i <= ug
             ng = self.dims.ng[i]
-            nbx = self.dims.nbx[i]
-            nbu = self.dims.nbu[i]
+            if ng > 0:
+                D_i = self.D[i] if nu[i] > 0 else np.zeros((ng, 0))
+                g = self.C[i] @ iterate.x[i] + D_i @ u_i
+                for j in range(ng):
+                    if is_active(g[j], self.lg[i][j]) or is_active(g[j], self.ug[i][j]):
+                        J = np.zeros((1, n_w))
+                        J[0, off[i]:off[i]+nu[i]] = D_i[j, :]
+                        J[0, off[i]+nu[i]:off[i+1]] = self.C[i][j, :]
+                        rows.append(J)
 
-            # Collect active constraint gradients, constraint matrix should be nx+nu+nx at each stage
-            A_active = []
-            row_len = nx + nu + nx
-
-            # Dynamic constraints are always active with [A, B, -I] structure
-            if i < horizon:
-                A_dyn = np.hstack([self.A[i], self.B[i], -np.eye(nx)])
-                A_active.append(A_dyn)
-
-            # Box constraints on states
-            for j in range(nbx):
-                idx = self.idxb[i][j]
-                if np.isclose(iterate.x[i][idx], self.lbx[i][j]):
-                    grad = np.zeros(row_len)
-                    grad[idx] = 1.0
-                    A_active.append(grad)
-
-                elif np.isclose(iterate.x[i][idx], self.ubx[i][j]):
-                    grad = np.zeros(row_len)
-                    grad[idx] = -1.0
-                    A_active.append(grad)
-
-            # Box constraints on controls
-            for j in range(nbu):
-                idx = j  # assuming inputs are indexed from 0 to nbu-1
-                if np.isclose(iterate.u[i][idx], self.lbu[i][j]):
-                    grad = np.zeros(row_len)
-                    grad[nx + idx] = 1.0
-                    A_active.append(grad)
-
-                elif np.isclose(iterate.u[i][idx], self.ubu[i][j]):
-                    grad = np.zeros(row_len)
-                    grad[nx + idx] = -1.0
-                    A_active.append(grad)
-
-            # General constraints
-            for j in range(ng):
-                value = self.C[i]@iterate.x[i] + self.D[i]@iterate.u[i]
-                if np.isclose(value[j], self.lg[i][j]):
-                    grad = np.hstack([self.C[i][j, :], self.D[i][j, :], np.zeros(nx)])
-                    A_active.append(grad)
-
-                elif np.isclose(value[j], self.ug[i][j]):
-                    grad = -np.hstack([self.C[i][j, :], self.D[i][j, :], np.zeros(nx)])
-                    A_active.append(grad)
-
-            A_active_matrix = np.vstack(A_active)
-            rank = np.linalg.matrix_rank(A_active_matrix)
-            if rank < A_active_matrix.shape[0]:
-                return False  # LICQ violated at this stage
-        return True  # LICQ holds at all stages
+        if not rows:
+            return True
+        J_active = np.vstack(rows)
+        return np.linalg.matrix_rank(J_active) == J_active.shape[0]

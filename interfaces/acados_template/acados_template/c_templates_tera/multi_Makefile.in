@@ -3,30 +3,7 @@
 #
 # This file is part of acados.
 #
-# The 2-Clause BSD License
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#
-# 1. Redistributions of source code must retain the above copyright notice,
-# this list of conditions and the following disclaimer.
-#
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-# this list of conditions and the following disclaimer in the documentation
-# and/or other materials provided with the distribution.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-# POSSIBILITY OF SUCH DAMAGE.;
-#
+# Licensed under the 2-Clause BSD License.
 
 
 
@@ -42,17 +19,17 @@
 {% set model_e = model | last %}
 
 
-{%- if solver_options.model_external_shared_lib_dir %}
-	{%- set model_external_shared_lib_dir = solver_options.model_external_shared_lib_dir %}
+{%- if code_gen_options.model_external_shared_lib_dir %}
+	{%- set model_external_shared_lib_dir = code_gen_options.model_external_shared_lib_dir %}
 {%- endif %}
-{%- if solver_options.model_external_shared_lib_name %}
-	{%- set model_external_shared_lib_name = solver_options.model_external_shared_lib_name %}
+{%- if code_gen_options.model_external_shared_lib_name %}
+	{%- set model_external_shared_lib_name = code_gen_options.model_external_shared_lib_name %}
 {%- endif %}
 
 {# acados linking libraries and flags #}
-{%- if code_gen_opts.acados_link_libs and code_gen_opts.os and code_gen_opts.os == "pc" %}
-	{%- set link_libs = code_gen_opts.acados_link_libs.qpoases ~ " " ~ code_gen_opts.acados_link_libs.hpmpc ~ " " ~ code_gen_opts.acados_link_libs.osqp ~ " " ~ code_gen_opts.acados_link_libs.daqp -%}
-	{%- set openmp_flag = code_gen_opts.acados_link_libs.openmp %}
+{%- if code_gen_options.acados_link_libs and code_gen_options.os and code_gen_options.os == "pc" %}
+	{%- set link_libs = code_gen_options.acados_link_libs.qpoases ~ " " ~ code_gen_options.acados_link_libs.hpmpc ~ " " ~ code_gen_options.acados_link_libs.osqp ~ " " ~ code_gen_options.acados_link_libs.daqp -%}
+	{%- set openmp_flag = code_gen_options.acados_link_libs.openmp %}
 {%- else %}
 	{%- set openmp_flag = " " %}
 	{%- if solver_options.qp_solver == "FULL_CONDENSING_QPOASES" %}
@@ -72,7 +49,7 @@ MODEL_SRC=
 
 {%- for jj in range(end=n_phases) %}{# phases loop !#}
 	{%- if model[jj].dyn_ext_fun_type == "casadi" %}
-{%- if mocp_opts.integrator_type[jj] == "ERK" %}
+{%- if mocp_opts.integrator_type[jj] is starting_with("ERK") %}
 MODEL_SRC+= {{ model[jj].name }}_model/{{ model[jj].name }}_expl_ode_fun.c
 MODEL_SRC+= {{ model[jj].name }}_model/{{ model[jj].name }}_expl_vde_forw.c
 MODEL_SRC+= {{ model[jj].name }}_model/{{ model[jj].name }}_expl_vde_adj.c
@@ -139,12 +116,18 @@ OCP_SRC+= {{ model[jj].name }}_cost/{{ model[jj].name }}_conl_cost_fun_jac_hess.
 OCP_SRC+= {{ model[jj].name }}_cost/{{ model[jj].name }}_cost_ext_cost_fun.c
 OCP_SRC+= {{ model[jj].name }}_cost/{{ model[jj].name }}_cost_ext_cost_fun_jac.c
 OCP_SRC+= {{ model[jj].name }}_cost/{{ model[jj].name }}_cost_ext_cost_fun_jac_hess.c
-{% if solver_options.with_solution_sens_wrt_params %}
+{% if code_gen_options.with_solution_sens_wrt_params_forw %}
 OCP_SRC+= {{ model[jj].name }}_cost/{{ model[jj].name }}_cost_ext_cost_hess_xu_p.c
+{% endif %}
+{% if code_gen_options.with_solution_sens_wrt_params_adj %}
+OCP_SRC+= {{ model[jj].name }}_cost/{{ model[jj].name }}_cost_ext_cost_adj_ux_pdiff.c
 {% endif %}
 	{%- elif cost.cost_source_ext_cost != cost.cost_source_ext_cost_0 %}
 OCP_SRC+= {{ model[jj].name }}_cost/{{ cost.cost_source_ext_cost }}
 	{%- endif %}
+{%- endif %}
+{%- if model[jj].has_slack_cost_expr.path %}
+OCP_SRC+= {{ model[jj].name }}_cost/{{ model[jj].name }}_cost_slack_penalty_fun_zZ.c
 {%- endif %}
 
 {%- if constraints[jj].constr_type == "BGH" and phases_dims[jj].nh > 0 %}
@@ -178,12 +161,18 @@ OCP_SRC+= {{ model_0.name }}_cost/{{ model_0.name }}_conl_cost_0_fun_jac_hess.c
 OCP_SRC+= {{ model_0.name }}_cost/{{ model_0.name }}_cost_ext_cost_0_fun.c
 OCP_SRC+= {{ model_0.name }}_cost/{{ model_0.name }}_cost_ext_cost_0_fun_jac.c
 OCP_SRC+= {{ model_0.name }}_cost/{{ model_0.name }}_cost_ext_cost_0_fun_jac_hess.c
-{% if solver_options.with_solution_sens_wrt_params %}
+{% if code_gen_options.with_solution_sens_wrt_params_forw %}
 OCP_SRC+= {{ model_0.name }}_cost/{{ model_0.name }}_cost_ext_cost_0_hess_xu_p.c
+{% endif %}
+{% if code_gen_options.with_solution_sens_wrt_params_adj %}
+OCP_SRC+= {{ model_0.name }}_cost/{{ model_0.name }}_cost_ext_cost_0_adj_ux_pdiff.c
 {% endif %}
 	{%- else %}
 OCP_SRC+= {{ model_0.name }}_cost/{{ cost_0.cost_source_ext_cost_0 }}
 	{%- endif %}
+{%- endif %}
+{%- if model_0.has_slack_cost_expr.initial %}
+OCP_SRC+= {{ model_0.name }}_cost/{{ model_0.name }}_cost_slack_penalty_fun_zZ_0.c
 {%- endif %}
 
 
@@ -226,12 +215,18 @@ OCP_SRC+= {{ model_e.name }}_cost/{{ model_e.name }}_conl_cost_e_fun_jac_hess.c
 OCP_SRC+= {{ model_e.name }}_cost/{{ model_e.name }}_cost_ext_cost_e_fun.c
 OCP_SRC+= {{ model_e.name }}_cost/{{ model_e.name }}_cost_ext_cost_e_fun_jac.c
 OCP_SRC+= {{ model_e.name }}_cost/{{ model_e.name }}_cost_ext_cost_e_fun_jac_hess.c
-{% if solver_options.with_solution_sens_wrt_params %}
+{% if code_gen_options.with_solution_sens_wrt_params_forw %}
 OCP_SRC+= {{ model_e.name }}_cost/{{ model_e.name }}_cost_ext_cost_e_hess_xu_p.c
+{% endif %}
+{% if code_gen_options.with_solution_sens_wrt_params_adj %}
+OCP_SRC+= {{ model_e.name }}_cost/{{ model_e.name }}_cost_ext_cost_e_adj_ux_pdiff.c
 {% endif %}
 	{%- else %}
 OCP_SRC+= {{ model_e.name }}_cost/{{ cost.cost_source_ext_cost_e }}
 	{%- endif %}
+{%- endif %}
+{%- if model_e.has_slack_cost_expr.terminal %}
+OCP_SRC+= {{ model_e.name }}_cost/{{ model_e.name }}_cost_slack_penalty_fun_zZ_e.c
 {%- endif %}
 {%- if solver_options.custom_update_filename %}
 	{%- if solver_options.custom_update_filename != "" %}
@@ -264,8 +259,8 @@ EXTERNAL_DIR+= {{ model_external_shared_lib_dir  }}
 EXTERNAL_LIB+= {{ model_external_shared_lib_name }}
 {%- endif %}
 
-INCLUDE_PATH = {{ code_gen_opts.acados_include_path }}
-LIB_PATH = {{ code_gen_opts.acados_lib_path }}
+INCLUDE_PATH = {{ code_gen_options.acados_include_path }}
+LIB_PATH = {{ code_gen_options.acados_lib_path }}
 
 # preprocessor flags for make's implicit rules
 {%- if solver_options.qp_solver == "FULL_CONDENSING_QPOASES" %}
@@ -295,7 +290,7 @@ CPPFLAGS+= -I $(INCLUDE_PATH)/daqp/include
  {%- endif %}
 
 # define the c-compiler flags for make's implicit rules
-CFLAGS = -fPIC -std=c99 {{ openmp_flag }} {{ solver_options.ext_fun_compile_flags }}#-fno-diagnostics-show-line-numbers -g
+CFLAGS = -fPIC -std=c99 {{ openmp_flag }} {{ code_gen_options.ext_fun_compile_flags }}#-fno-diagnostics-show-line-numbers -g
 {% if solver_options.with_batch_functionality %}
 CFLAGS += -fopenmp
 {%- endif %}
@@ -316,8 +311,8 @@ LDLIBS+= -lm
 LDLIBS+= {{ link_libs }}
 
 # libraries
-LIBACADOS_SOLVER=libacados_solver_{{ name }}{{ code_gen_opts.shared_lib_ext }}
-LIBACADOS_OCP_SOLVER=libacados_ocp_solver_{{ name }}{{ code_gen_opts.shared_lib_ext }}
+LIBACADOS_SOLVER=libacados_solver_{{ name }}{{ code_gen_options.shared_lib_ext }}
+LIBACADOS_OCP_SOLVER=libacados_ocp_solver_{{ name }}{{ code_gen_options.shared_lib_ext }}
 
 # virtual targets
 .PHONY : all clean
@@ -340,7 +335,7 @@ ocp_cython_c: ocp_shared_lib
 	-o acados_ocp_solver_pyx.c \
 	-I $(INCLUDE_PATH)/../interfaces/acados_template/acados_template \
 	$(INCLUDE_PATH)/../interfaces/acados_template/acados_template/acados_ocp_solver_pyx.pyx \
-	-I {{ code_gen_opts.code_export_directory }} \
+	-I {{ code_gen_options.code_export_directory }} \
 
 ocp_cython_o: ocp_cython_c
 	$(CC) $(ACADOS_FLAGS) -c -O2 \
@@ -349,34 +344,34 @@ ocp_cython_o: ocp_cython_c
 	-I $(INCLUDE_PATH)/blasfeo/include/ \
 	-I $(INCLUDE_PATH)/hpipm/include/ \
 	-I $(INCLUDE_PATH) \
-	{%- for path in code_gen_opts.cython_include_dirs %}
+	{%- for path in code_gen_options.cython_include_dirs %}
 	-I {{ path }} \
 	{%- endfor %}
 	acados_ocp_solver_pyx.c \
 
 ocp_cython: ocp_cython_o
 	$(CC) $(ACADOS_FLAGS) -shared \
-	-o acados_ocp_solver_pyx{{ code_gen_opts.shared_lib_ext }} \
+	-o acados_ocp_solver_pyx{{ code_gen_options.shared_lib_ext }} \
 	-Wl,-rpath=$(LIB_PATH) \
 	acados_ocp_solver_pyx.o \
-	$(abspath .)/libacados_ocp_solver_{{ name }}{{ code_gen_opts.shared_lib_ext }} \
+	$(abspath .)/libacados_ocp_solver_{{ name }}{{ code_gen_options.shared_lib_ext }} \
 	$(LDFLAGS) $(LDLIBS)
 
-{%- if code_gen_opts.os and code_gen_opts.os == "pc" %}
+{%- if code_gen_options.os and code_gen_options.os == "pc" %}
 
 clean:
 	del \Q *.o 2>nul
-	del \Q *{{ code_gen_opts.shared_lib_ext }} 2>nul
+	del \Q *{{ code_gen_options.shared_lib_ext }} 2>nul
 	del \Q main_{{ name }} 2>nul
 
 clean_ocp_shared_lib:
-	del \Q libacados_ocp_solver_{{ name }}{{ code_gen_opts.shared_lib_ext }} 2>nul
+	del \Q libacados_ocp_solver_{{ name }}{{ code_gen_options.shared_lib_ext }} 2>nul
 	del \Q acados_solver_{{ name }}.o 2>nul
 
 clean_ocp_cython:
-	del \Q libacados_ocp_solver_{{ name }}{{ code_gen_opts.shared_lib_ext }} 2>nul
+	del \Q libacados_ocp_solver_{{ name }}{{ code_gen_options.shared_lib_ext }} 2>nul
 	del \Q acados_solver_{{ name }}.o 2>nul
-	del \Q acados_ocp_solver_pyx{{ code_gen_opts.shared_lib_ext }} 2>nul
+	del \Q acados_ocp_solver_pyx{{ code_gen_options.shared_lib_ext }} 2>nul
 	del \Q acados_ocp_solver_pyx.o 2>nul
 
 {%- else %}
@@ -391,9 +386,9 @@ clean_ocp_shared_lib:
 	$(RM) $(OCP_OBJ)
 
 clean_ocp_cython:
-	$(RM) libacados_ocp_solver_{{ name }}{{ code_gen_opts.shared_lib_ext }}
+	$(RM) libacados_ocp_solver_{{ name }}{{ code_gen_options.shared_lib_ext }}
 	$(RM) acados_solver_{{ name }}.o
-	$(RM) acados_ocp_solver_pyx{{ code_gen_opts.shared_lib_ext }}
+	$(RM) acados_ocp_solver_pyx{{ code_gen_options.shared_lib_ext }}
 	$(RM) acados_ocp_solver_pyx.o
 
 {%- endif %}

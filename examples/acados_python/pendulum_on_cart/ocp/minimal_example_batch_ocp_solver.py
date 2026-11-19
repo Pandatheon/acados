@@ -3,30 +3,7 @@
 #
 # This file is part of acados.
 #
-# The 2-Clause BSD License
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#
-# 1. Redistributions of source code must retain the above copyright notice,
-# this list of conditions and the following disclaimer.
-#
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-# this list of conditions and the following disclaimer in the documentation
-# and/or other materials provided with the distribution.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-# POSSIBILITY OF SUCH DAMAGE.;
-#
+# Licensed under the 2-Clause BSD License.
 
 import sys
 sys.path.insert(0, '../common')
@@ -91,6 +68,8 @@ def setup_ocp(tol=1e-7):
 
     ocp.solver_options.tf = Tf
 
+    ocp.solver_options.with_batch_functionality = True
+
     return ocp
 
 
@@ -131,9 +110,8 @@ def main_batch(Xinit, simU, tol, num_threads_in_batch_solve=1):
     batch_solver.num_threads_in_batch_solve = num_threads_in_batch_solve
     assert batch_solver.num_threads_in_batch_solve == num_threads_in_batch_solve
 
-    for n in range(N_batch):
-        batch_solver.ocp_solvers[n].constraints_set(0, "lbx", Xinit[n])
-        batch_solver.ocp_solvers[n].constraints_set(0, "ubx", Xinit[n])
+    batch_solver.constraints_set(0, "lbx", Xinit)
+    batch_solver.constraints_set(0, "ubx", Xinit)
 
     # set initial guess
     Xinit_batch = np.array([np.tile(Xinit[i], (ocp.solver_options.N_horizon+1,)) for i in range(N_batch)])
@@ -155,6 +133,11 @@ def main_batch(Xinit, simU, tol, num_threads_in_batch_solve=1):
     for n in range(N_batch):
         if not np.linalg.norm(U_batch[n, :ocp.dims.nu] - simU[n]) < tol*10:
             raise Exception(f"solution should match sequential call up to {tol*10} got error {np.linalg.norm(U_batch[n, :ocp.dims.nu] - simU[n])} for {n}th batch solve")
+
+    # test get
+    u_1 = batch_solver.get(ocp.solver_options.N_horizon - 1, "u")
+    if np.linalg.norm(u_1.flatten() - U_batch[:, -1]) > 1e-12:
+        raise Exception("batch getter should return the same result.")
 
     # test N_batch_max is respected
     try:

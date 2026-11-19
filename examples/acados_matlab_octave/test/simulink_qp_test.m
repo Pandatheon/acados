@@ -3,29 +3,7 @@
 %
 % This file is part of acados.
 %
-% The 2-Clause BSD License
-%
-% Redistribution and use in source and binary forms, with or without
-% modification, are permitted provided that the following conditions are met:
-%
-% 1. Redistributions of source code must retain the above copyright notice,
-% this list of conditions and the following disclaimer.
-%
-% 2. Redistributions in binary form must reproduce the above copyright notice,
-% this list of conditions and the following disclaimer in the documentation
-% and/or other materials provided with the distribution.
-%
-% THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-% AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-% IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-% ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-% LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-% CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-% SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-% INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-% CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-% ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-% POSSIBILITY OF SUCH DAMAGE.;
+% Licensed under the 2-Clause BSD License.
 
 %
 
@@ -38,11 +16,13 @@ import casadi.*
 N = 20; % number of discretization steps
 nx = 3;
 nu = 3;
-[ocp_model, ocp_opts, simulink_opts, x0] = create_ocp_qp_solver_formulation(N);
+[ocp, x0] = create_ocp_qp_solver_formulation(N);
 
+ocp.simulink_opts.inputs.reset_flags = 1;
+ocp.name = ocp.model.name;
 
 %% create ocp solver
-ocp_solver = acados_ocp(ocp_model, ocp_opts, simulink_opts);
+ocp_solver = AcadosOcpSolver(ocp);
 ocp_solver.reset();
 
 % solver initial guess
@@ -69,12 +49,12 @@ status = ocp_solver.get('status'); % 0 - success
 ocp_solver.print('stat')
 
 %% simulink test
-cd c_generated_code
+cd(ocp.code_gen_options.code_export_directory);
 make_sfun; % ocp solver
 cd ..;
 
 n_sim = 3;
-
+reset_flags = [1, 0, 0, 0]; % default values
 
 %% Test Simulink example block
 for itest = [1, 2, 3]
@@ -161,8 +141,6 @@ disp('successfully ran simulink_model_advanced_closed_loop');
 sqp_iter_signal = out_sim.logsout.getElement('sqp_iter');
 sqp_iter_simulink = sqp_iter_signal.Values.Data;
 disp('checking SQP iter, got')
-disp(sqp_iter_simulink)
-
 fprintf('should require one SQP iteration in first instance.\n')
 if sqp_iter_simulink(1) ~= 1
     error('failed');

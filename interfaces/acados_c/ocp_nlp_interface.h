@@ -3,29 +3,7 @@
  *
  * This file is part of acados.
  *
- * The 2-Clause BSD License
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright notice,
- * this list of conditions and the following disclaimer.
- *
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- * this list of conditions and the following disclaimer in the documentation
- * and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.;
+ * Licensed under the 2-Clause BSD License.
  */
 
 
@@ -60,10 +38,10 @@ typedef enum
 } ocp_nlp_solver_t;
 
 
-/// Types of the system dynamics, discrete or continuous time.
 typedef enum
 {
     CONTINUOUS_MODEL,
+    CONTINUOUS_MODEL_WITH_COST,
     DISCRETE_MODEL,
     INVALID_DYNAMICS,
 } ocp_nlp_dynamics_t;
@@ -314,6 +292,7 @@ ACADOS_SYMBOL_EXPORT void ocp_nlp_out_get(ocp_nlp_config *config, ocp_nlp_dims *
 
 //
 ACADOS_SYMBOL_EXPORT void ocp_nlp_get_at_stage(ocp_nlp_solver *solver, int stage, const char *field, void *value);
+ACADOS_SYMBOL_EXPORT void ocp_nlp_dump_last_qp_to_json(ocp_nlp_solver *solver, const char *filename);
 
 ACADOS_SYMBOL_EXPORT void ocp_nlp_get_from_iterate(ocp_nlp_solver *solver, int iter, int stage, const char *field, void *value);
 
@@ -401,6 +380,14 @@ ACADOS_SYMBOL_EXPORT int ocp_nlp_setup_qp_matrices_and_factorize(ocp_nlp_solver 
 /// \param nlp_in The inputs struct.
 /// \param nlp_out The output struct.
 ACADOS_SYMBOL_EXPORT void ocp_nlp_solver_reset_qp_memory(ocp_nlp_solver *solver, ocp_nlp_in *nlp_in, ocp_nlp_out *nlp_out);
+
+
+// Resets the memory of the integrators
+///
+/// \param solver The solver struct.
+/// \param nlp_in The inputs struct.
+/// \param nlp_out The output struct.
+ACADOS_SYMBOL_EXPORT void ocp_nlp_solver_reset_integrator_memory(ocp_nlp_solver *solver, ocp_nlp_in *nlp_in, ocp_nlp_out *nlp_out);
 
 
 /// Performs precomputations for the solver. Needs to be called before

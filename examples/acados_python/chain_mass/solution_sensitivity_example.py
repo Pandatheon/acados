@@ -3,51 +3,25 @@
 #
 # This file is part of acados.
 #
-# The 2-Clause BSD License
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#
-# 1. Redistributions of source code must retain the above copyright notice,
-# this list of conditions and the following disclaimer.
-#
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-# this list of conditions and the following disclaimer in the documentation
-# and/or other materials provided with the distribution.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-# POSSIBILITY OF SUCH DAMAGE.;
-#
-
+# Licensed under the 2-Clause BSD License.
 
 """
 Test for solution sensitivities with many parameters.
 """
 
-import os
 import numpy as np
 import casadi as ca
 from casadi import SX, norm_2, vertcat
-from casadi.tools import struct_symSX, entry
-from casadi.tools.structure3 import DMStruct, ssymStruct
 import matplotlib.pyplot as plt
 from acados_template import AcadosModel, AcadosOcp, AcadosOcpSolver
 from utils import get_chain_params
 from typing import Tuple, Optional
 from plot_utils import plot_timings
 import time
+from param_utils import ParamLayout, ParamVector
 
 
-def export_discrete_erk4_integrator_step(f_expl: SX, x: SX, u: SX, p: ssymStruct, h: float, n_steps: int = 2) -> ca.SX:
+def export_discrete_erk4_integrator_step(f_expl: SX, x: SX, u: SX, p: SX, h: float, n_steps: int = 2) -> ca.SX:
     """Define ERK4 integrator for continuous dynamics."""
     dt = h / n_steps
     ode = ca.Function("f", [x, u, p], [f_expl])
@@ -61,7 +35,7 @@ def export_discrete_erk4_integrator_step(f_expl: SX, x: SX, u: SX, p: ssymStruct
 
     return xnext
 
-def export_discrete_euler_integrator_step(f_expl: SX, x: SX, u: SX, p: ssymStruct, h: float, n_steps: int = 2) -> ca.SX:
+def export_discrete_euler_integrator_step(f_expl: SX, x: SX, u: SX, p: SX, h: float, n_steps: int = 2) -> ca.SX:
     """Define Euler integrator for continuous dynamics."""
     dt = h / n_steps
     ode = ca.Function("f", [x, u, p], [f_expl])
@@ -73,25 +47,25 @@ def export_discrete_euler_integrator_step(f_expl: SX, x: SX, u: SX, p: ssymStruc
     return xnext
 
 
-def define_param_ssymStruct(n_mass: int, disturbance: bool = True) -> ssymStruct:
-    """Define parameter struct."""
+def define_param_layout(n_mass: int, disturbance: bool = True) -> ParamLayout:
+    """Define the parameter layout."""
     n_link = n_mass - 1
 
     nx, nu = define_nx_nu(n_mass)
 
     param_entries = [
-        entry("m", shape=1, repeat=n_link),
-        entry("D", shape=3, repeat=n_link),
-        entry("L", shape=3, repeat=n_link),
-        entry("C", shape=3, repeat=n_link),
-        entry("Q", shape=(nx, nx)),
-        entry("R", shape=(nu, nu)),
+        {"name": "m", "shape": 1, "repeat": n_link},
+        {"name": "D", "shape": 3, "repeat": n_link},
+        {"name": "L", "shape": 3, "repeat": n_link},
+        {"name": "C", "shape": 3, "repeat": n_link},
+        {"name": "Q", "shape": (nx, nx)},
+        {"name": "R", "shape": (nu, nu)},
     ]
 
     if disturbance:
-        param_entries.append(entry("w", shape=3, repeat=n_mass - 2))
+        param_entries.append({"name": "w", "shape": 3, "repeat": n_mass - 2})
 
-    return struct_symSX(param_entries)
+    return ParamLayout(param_entries)
 
 
 def define_nx_nu(n_mass: int) -> Tuple[int, int]:
@@ -103,12 +77,7 @@ def define_nx_nu(n_mass: int) -> Tuple[int, int]:
     return nx, nu
 
 
-def find_idx_for_labels(sub_vars: SX, sub_label: str) -> list[int]:
-    """Return a list of indices where sub_label is part of the variable label."""
-    return [i for i, label in enumerate(sub_vars.str().strip("[]").split(", ")) if sub_label in label]
-
-
-def export_chain_mass_model(n_mass: int, Ts: float = 0.2, disturbance: bool = False, discrete_dyn_type: str = "RK4") -> Tuple[AcadosModel, DMStruct]:
+def export_chain_mass_model(n_mass: int, Ts: float = 0.2, disturbance: bool = False, discrete_dyn_type: str = "RK4") -> Tuple[AcadosModel, ParamVector]:
     """Export chain mass model for acados."""
     x0 = np.array([0, 0, 0])  # fix mass (at wall)
 
@@ -122,7 +91,10 @@ def export_chain_mass_model(n_mass: int, Ts: float = 0.2, disturbance: bool = Fa
     xdot = SX.sym("xdot", nx, 1)
 
     f = SX.zeros(3 * M, 1)  # force on intermediate masses
-    p = define_param_ssymStruct(n_mass=n_mass, disturbance=disturbance)
+
+    layout = define_param_layout(n_mass=n_mass, disturbance=disturbance)
+    p_sym = SX.sym("p", layout.size, 1)
+    p = ParamVector(layout, p_sym)
 
     # Gravity force
     for i in range(M):
@@ -136,8 +108,11 @@ def export_chain_mass_model(n_mass: int, Ts: float = 0.2, disturbance: bool = Fa
             dist = xpos[i * 3 : (i + 1) * 3] - xpos[(i - 1) * 3 : i * 3]
 
         F = ca.SX.zeros(3, 1)
+        D_i = p["D", i]
+        L_i = p["L", i]
+        m_i = p["m", i]
         for j in range(3):
-            F[j] = p["D", i, j] / p["m", i] * (1 - p["L", i, j] / norm_2(dist)) * dist[j]
+            F[j] = D_i[j] / m_i * (1 - L_i[j] / norm_2(dist)) * dist[j]
 
         # mass on the right
         if i < M:
@@ -157,8 +132,9 @@ def export_chain_mass_model(n_mass: int, Ts: float = 0.2, disturbance: bool = Fa
             vel = xvel[i * 3 : (i + 1) * 3] - xvel[(i - 1) * 3 : i * 3]
 
         F = ca.SX.zeros(3, 1)
+        C_i = p["C", i]
         for j in range(3):
-            F[j] = p["C", i, j] * vel[j]
+            F[j] = C_i[j] * vel[j]
 
         # mass on the right
         if i < M:
@@ -182,9 +158,9 @@ def export_chain_mass_model(n_mass: int, Ts: float = 0.2, disturbance: bool = Fa
     f_expl = vertcat(xvel, u, f)
     f_impl = xdot - f_expl
     if discrete_dyn_type == "RK4":
-        f_disc = export_discrete_erk4_integrator_step(f_expl, x, u, p, Ts)
+        f_disc = export_discrete_erk4_integrator_step(f_expl, x, u, p_sym, Ts)
     elif discrete_dyn_type == "EULER":
-        f_disc = export_discrete_euler_integrator_step(f_expl, x, u, p, Ts)
+        f_disc = export_discrete_euler_integrator_step(f_expl, x, u, p_sym, Ts)
     else:
         raise ValueError("discrete_dyn_type must be either 'RK4' or 'EULER'")
 
@@ -196,20 +172,20 @@ def export_chain_mass_model(n_mass: int, Ts: float = 0.2, disturbance: bool = Fa
     model.x = x
     model.xdot = xdot
     model.u = u
-    model.p_global = p.cat
+    model.p_global = p_sym
     model.name = model_name
 
-    p_map = p(0)
+    p_num = ParamVector(layout, np.zeros((layout.size, 1)))
 
-    return model, p_map
+    return model, p_num
 
 
 def compute_parametric_steady_state(
-    model: AcadosModel, p: DMStruct, xPosFirstMass: np.ndarray, xEndRef: np.ndarray
+    model: AcadosModel, p: ParamVector, xPosFirstMass: np.ndarray, xEndRef: np.ndarray
 ) -> np.ndarray:
     """Compute steady state for chain mass model."""
 
-    p_ = p(0)
+    p_ = ParamVector(p.layout, np.zeros((p.layout.size, 1)))
     p_["m"] = p["m"]
     p_["D"] = p["D"]
     p_["L"] = p["L"]
@@ -260,7 +236,7 @@ def export_parametric_ocp(
     nlp_tol: float = 1e-5,
     random_scale: dict = {"m": 0.0, "D": 0.0, "L": 0.0, "C": 0.0},
     ext_fun_compile_flags: Optional[str] = None,
-) -> Tuple[AcadosOcp, DMStruct]:
+) -> Tuple[AcadosOcp, ParamVector]:
     # create ocp object to formulate the OCP
     ocp = AcadosOcp()
     ocp.solver_options.N_horizon = chain_params_["N"]
@@ -318,13 +294,13 @@ def export_parametric_ocp(
     x_e = ocp.model.x - x_ss
     u_e = ocp.model.u - np.zeros((nu, 1))
 
-    idx = find_idx_for_labels(define_param_ssymStruct(chain_params_["n_mass"], disturbance=True).cat, "Q")
+    idx = p.layout.label_indices("Q")
     Q_sym = ca.reshape(ocp.model.p_global[idx], (nx, nx))
     q_diag = np.ones((nx, 1))
     q_diag[3 * M : 3 * M + 3] = M + 1
     p["Q"] = 2 * np.diagflat(q_diag)
 
-    idx = find_idx_for_labels(define_param_ssymStruct(chain_params_["n_mass"], disturbance=True).cat, "R")
+    idx = p.layout.label_indices("R")
     R_sym = ca.reshape(ocp.model.p_global[idx], (nu, nu))
     p["R"] = 2 * np.diagflat(1e-2 * np.ones((nu, 1)))
 
@@ -333,7 +309,7 @@ def export_parametric_ocp(
 
     ocp.model.cost_y_expr = vertcat(x_e, u_e)
 
-    ocp.p_global_values = p.cat.full().flatten()
+    ocp.p_global_values = p.cat.flatten()
 
     # set constraints
     umax = 1 * np.ones((nu,))
@@ -355,7 +331,8 @@ def export_parametric_ocp(
     if hessian_approx == "EXACT":
         ocp.solver_options.qp_solver_ric_alg = qp_solver_ric_alg
         ocp.solver_options.qp_solver_cond_N = ocp.solver_options.N_horizon
-        ocp.solver_options.with_solution_sens_wrt_params = True
+        ocp.code_gen_options.with_solution_sens_wrt_params_forw = True
+        ocp.code_gen_options.with_solution_sens_wrt_params_adj = True
     else:
         ocp.solver_options.nlp_solver_max_iter = nlp_iter
         ocp.solver_options.qp_solver_cond_N = ocp.solver_options.N_horizon
@@ -364,7 +341,7 @@ def export_parametric_ocp(
 
     ocp.solver_options.tf = ocp.solver_options.N_horizon * chain_params_["Ts"]
     if ext_fun_compile_flags is not None:
-        ocp.solver_options.ext_fun_compile_flags = ext_fun_compile_flags
+        ocp.code_gen_options.ext_fun_compile_flags = ext_fun_compile_flags
 
     return ocp, p
 
@@ -372,7 +349,8 @@ def export_parametric_ocp(
 def main_parametric(qp_solver_ric_alg: int = 0,
                     discrete_dyn_type: str = "RK4",
                     chain_params_: dict = get_chain_params(),
-                    with_more_adjoints = True,
+                    with_forw_via_adjoints = True,
+                    with_u_forw_via_adjoints = True,
                     generate_code: bool = True,
                     ext_fun_compile_flags: Optional[str] = None,
                     np_test: int = 20,
@@ -385,13 +363,8 @@ def main_parametric(qp_solver_ric_alg: int = 0,
         discrete_dyn_type=discrete_dyn_type,
         ext_fun_compile_flags=ext_fun_compile_flags,
     )
-    ocp_json_file = "acados_ocp_" + ocp.model.name + ".json"
 
-    # Check if json_file exists
-    if not generate_code and os.path.exists(ocp_json_file):
-        ocp_solver = AcadosOcpSolver(ocp, json_file=ocp_json_file, build=False, generate=False)
-    else:
-        ocp_solver = AcadosOcpSolver(ocp, json_file=ocp_json_file)
+    ocp_solver = AcadosOcpSolver(ocp, build=False, generate=False, check_reuse_possible=True)
 
     sensitivity_ocp, _ = export_parametric_ocp(
         chain_params_=chain_params_,
@@ -401,14 +374,10 @@ def main_parametric(qp_solver_ric_alg: int = 0,
         discrete_dyn_type=discrete_dyn_type,
         ext_fun_compile_flags=ext_fun_compile_flags,
     )
-    sensitivity_ocp.model.name = f"{ocp.model.name}_sensitivity"
 
-    ocp_json_file = "acados_sensitivity_ocp_" + sensitivity_ocp.model.name + ".json"
-    # Check if json_file exists
-    if not generate_code and os.path.exists(ocp_json_file):
-        sensitivity_solver = AcadosOcpSolver(sensitivity_ocp, json_file=ocp_json_file, build=False, generate=False)
-    else:
-        sensitivity_solver = AcadosOcpSolver(sensitivity_ocp, json_file=ocp_json_file)
+    # NOTE: the OCP of the sensitivity solver needs a different name than the original OCP for the shared libraries to have unique names
+    sensitivity_ocp.name = f"{sensitivity_ocp.model.name}_sensitivity"
+    sensitivity_solver = AcadosOcpSolver(sensitivity_ocp, build=False, generate=False, check_reuse_possible=True)
 
     M = chain_params_["n_mass"] - 2
     xEndRef = np.zeros((3, 1))
@@ -424,7 +393,7 @@ def main_parametric(qp_solver_ric_alg: int = 0,
     # p_label = "D_2_0"
     p_label = f"C_{M}_0"
 
-    p_idx = find_idx_for_labels(define_param_ssymStruct(chain_params_["n_mass"], disturbance=True).cat, p_label)[0]
+    p_idx = parameter_values.layout.label_indices(p_label)[0]
 
     p_var = np.linspace(0.5 * parameter_values.cat[p_idx], 1.5 * parameter_values.cat[p_idx], np_test).flatten()
 
@@ -435,20 +404,20 @@ def main_parametric(qp_solver_ric_alg: int = 0,
 
     timings_solve_ocp_solver = np.zeros((np_test))
     timings_lin_and_factorize = np.zeros((np_test))
-    timings_lin_params = np.zeros((np_test))
     timings_solve_params = np.zeros((np_test))
     timings_store_load = np.zeros((np_test))
     timings_lin_exact_hessian_qp = np.zeros((np_test))
     timings_solve_params_adj = np.zeros((np_test))
     timings_parameter_update = np.zeros((np_test))
-    if with_more_adjoints:
-        timings_solve_params_adj_all_primals = np.zeros((np_test))
+    if with_u_forw_via_adjoints:
         timings_solve_params_adj_uforw = np.zeros((np_test))
 
         # seed for forward sensitivities of u_0
         seed_u_u0 = [(0, np.eye(nu))]
         seed_x_u0 = [(0, np.zeros((nx, nu)))]
 
+    if with_forw_via_adjoints:
+        timings_solve_params_adj_all_primals = np.zeros((np_test))
         # seed for forward sensitivities of all primals
         N_horizon = ocp.solver_options.N_horizon
         n_primal = nx * (N_horizon + 1) + nu * N_horizon
@@ -473,9 +442,9 @@ def main_parametric(qp_solver_ric_alg: int = 0,
     for i in range(np_test):
 
         # Update parameters
-        parameter_values.cat[p_idx] = p_var[i]
+        parameter_values.cat[p_idx, 0] = p_var[i]
 
-        p_val = parameter_values.cat.full().flatten()
+        p_val = parameter_values.cat.flatten()
         t_start = time.time()
         ocp_solver.set_p_global_and_precompute_dependencies(p_val)
         sensitivity_solver.set_p_global_and_precompute_dependencies(p_val)
@@ -505,12 +474,11 @@ def main_parametric(qp_solver_ric_alg: int = 0,
         out_dict = sensitivity_solver.eval_solution_sensitivity(0, "p_global")
         sens_x_ = out_dict['sens_x']
         sens_u_ = out_dict['sens_u']
-        timings_lin_params[i] = sensitivity_solver.get_stats("time_solution_sens_lin")
-        timings_solve_params[i] = sensitivity_solver.get_stats("time_solution_sens_solve")
+        timings_solve_params[i] = sensitivity_solver.get_stats("time_solution_sens_solve") + sensitivity_solver.get_stats("time_solution_sens_lin")
 
         # Calculate adjoint sensitivities
         sens_adj = sensitivity_solver.eval_adjoint_solution_sensitivity(seed_x=[(0, seed_x)], seed_u=[(0, seed_u)])
-        timings_solve_params_adj[i] = sensitivity_solver.get_stats("time_solution_sens_solve")
+        timings_solve_params_adj[i] = sensitivity_solver.get_stats("time_solution_sens_solve") + sensitivity_solver.get_stats("time_solution_sens_lin")
 
         sens_adj_ref = seed_u.T @ sens_u_ + seed_x.T @ sens_x_
         # print(f"{sens_adj_ref=}")
@@ -530,16 +498,15 @@ def main_parametric(qp_solver_ric_alg: int = 0,
 
         sens_u.append(sens_u_[:, p_idx])
 
-        if with_more_adjoints:
+        if with_forw_via_adjoints:
             # Calculate forward sensitivities of primals via adjoint sensitivities
             sens_adj = sensitivity_solver.eval_adjoint_solution_sensitivity(seed_x=zip_stages_x, seed_u=zip_stages_u)
             timings_solve_params_adj_all_primals[i] = sensitivity_solver.get_stats("time_solution_sens_solve")
 
+        if with_u_forw_via_adjoints:
             # solution sensitivities of all u_0 entries
             sens_adj = sensitivity_solver.eval_adjoint_solution_sensitivity(seed_u=seed_u_u0, seed_x=seed_x_u0)
             timings_solve_params_adj_uforw[i] = sensitivity_solver.get_stats("time_solution_sens_solve")
-
-            print(f"i {i} {timings_solve_params_adj[i]*1e3:.5f} \t {timings_solve_params[i]*1e3:.5f} \t {timings_solve_params_adj_uforw[i]*1e3:.5f} \t {timings_solve_params_adj_all_primals[i]*1e3:.5f}")
 
             # check wrt forward
             diff_sens_u_vs_via_adj = np.max(np.abs(sens_adj- out_dict['sens_u']))
@@ -548,7 +515,7 @@ def main_parametric(qp_solver_ric_alg: int = 0,
             else:
                 print(f"Success: diff_sens_u_vs_via_adj = {diff_sens_u_vs_via_adj} < {test_tol}")
 
-            # assert np.allclose(sens_adj, out_dict['sens_u'])
+            # np.testing.assert_allclose(sens_adj, out_dict['sens_u'])
 
     if generate_plots:
         timings_common = {
@@ -557,26 +524,29 @@ def main_parametric(qp_solver_ric_alg: int = 0,
             "parameter update": timings_parameter_update * 1e3,
             "setup exact Lagrange Hessian (S2)": timings_lin_exact_hessian_qp * 1e3,
             "factorize exact Lagrange Hessian (S3)": timings_lin_and_factorize * 1e3,
-            r"evaluate $J_\star$ (S4)": timings_lin_params * 1e3,
         }
+        param_tex_str = r'\theta'
         timing_results_forward = timings_common.copy()
         timing_results_adjoint = timings_common.copy()
         timing_results_adj_uforw = timings_common.copy()
         timing_results_adj_all_primals = timings_common.copy()
 
-        backsolve_label = "sensitivity solve given factorization (S5)"
+        backsolve_label = "sensitivity solve (S4) + (S5)" # given factorization
         timing_results_forward[backsolve_label] = timings_solve_params * 1e3
         timing_results_adjoint[backsolve_label] = timings_solve_params_adj * 1e3
 
         timings_list = [timing_results_forward, timing_results_adjoint]
-        labels = [r'$\frac{\partial w^\star}{\partial \theta}$ via forward', r'$\nu^\top \frac{\partial w^\star}{\partial \theta}$ via adjoint']
+        labels = [r'$\frac{\partial w^\star}{\partial ' + param_tex_str + r'}$ via forward', r'$\nu^\top \frac{\partial w^\star}{\partial ' + param_tex_str + r'}$ via adjoint']
 
-        if with_more_adjoints:
+        if with_u_forw_via_adjoints:
             timing_results_adj_uforw[backsolve_label] = timings_solve_params_adj_uforw * 1e3
-            timing_results_adj_all_primals[backsolve_label] = timings_solve_params_adj_all_primals * 1e3
-            timings_list += [timing_results_adj_uforw, timing_results_adj_all_primals]
-            labels += [r'$\frac{\partial u_0^\star}{\partial \theta}$ via adjoints', r'$\frac{\partial z^\star}{\partial \theta} $ via adjoints']
+            timings_list += [timing_results_adj_uforw]
+            labels += [r'$\frac{\partial u_0^\star}{\partial ' + param_tex_str + r'}$ via adjoints']
 
+        if with_forw_via_adjoints:
+            timing_results_adj_all_primals[backsolve_label] = timings_solve_params_adj_all_primals * 1e3
+            timings_list += [timing_results_adj_all_primals]
+            labels += [r'$\frac{\partial z^\star}{\partial ' + param_tex_str + r'} $ via adjoints']
 
         print_timings(timing_results_forward, metric="median")
         print_timings(timing_results_forward, metric="min")
@@ -618,7 +588,7 @@ def main_parametric(qp_solver_ric_alg: int = 0,
         plt.tight_layout()
         plt.savefig("chain_adj_fwd_sens.pdf")
 
-        plot_timings(timings_list, labels, figure_filename="timing_adj_fwd_sens_chain.png", t_max=10, horizontal=True, figsize=(12, 3), with_patterns=True)
+        plot_timings(timings_list, labels, figure_filename="timing_adj_fwd_sens_chain.png", t_max=10, horizontal=True, figsize=(9, 2.4), with_patterns=True)
 
         plt.show()
 
@@ -650,7 +620,8 @@ def main_test():
                     discrete_dyn_type="EULER",
                     chain_params_=chain_params,
                     generate_code=True,
-                    with_more_adjoints=False,
+                    with_forw_via_adjoints=False,
+                    with_u_forw_via_adjoints=False,
                     ext_fun_compile_flags="",
                     np_test=2,
                     generate_plots=False,
@@ -659,7 +630,7 @@ def main_test():
 def main_experiment():
     chain_params = get_chain_params()
     chain_params["n_mass"] = 3
-    main_parametric(qp_solver_ric_alg=0, discrete_dyn_type="RK4", chain_params_=chain_params, generate_code=True, with_more_adjoints=True)
+    main_parametric(qp_solver_ric_alg=0, discrete_dyn_type="RK4", chain_params_=chain_params, generate_code=True, with_forw_via_adjoints=False, with_u_forw_via_adjoints=True)
 
 if __name__ == "__main__":
     # use settings for fast testing -> test with this on CI
